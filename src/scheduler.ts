@@ -160,7 +160,8 @@ export class WorkflowScheduler {
 	private async handleTaskEvent(event: string, rawPayload: unknown): Promise<void> {
 		const payload = normalizeTaskNotesEventPayload(event, rawPayload);
 		for (const workflow of this.getWorkflows()) {
-			for (const trigger of workflow.workflow?.triggers ?? []) {
+			if (!workflow.workflow?.enabled) continue;
+			for (const trigger of workflow.workflow.triggers) {
 				if (!isTaskNotesEventTrigger(trigger)) continue;
 				if (!this.taskNotesTriggerMatches(trigger, payload)) continue;
 				await this.runWorkflow(workflow, { trigger: { ...payload, id: trigger.id } });
@@ -206,7 +207,8 @@ export class WorkflowScheduler {
 	): Promise<void> {
 		if (!(file instanceof TFile)) return;
 		for (const workflow of this.getWorkflows()) {
-			for (const trigger of workflow.workflow?.triggers ?? []) {
+			if (!workflow.workflow?.enabled) continue;
+			for (const trigger of workflow.workflow.triggers) {
 				if (trigger.type !== "obsidian.vault" || trigger.event !== event) continue;
 				if (!pathMatchesFilter(file.path, trigger.path)) continue;
 				await this.runWorkflow(workflow, {
@@ -229,7 +231,8 @@ export class WorkflowScheduler {
 		file: TFile | null
 	): Promise<void> {
 		for (const workflow of this.getWorkflows()) {
-			for (const trigger of workflow.workflow?.triggers ?? []) {
+			if (!workflow.workflow?.enabled) continue;
+			for (const trigger of workflow.workflow.triggers) {
 				if (trigger.type !== "obsidian.workspace" || trigger.event !== event) continue;
 				if (file && !pathMatchesFilter(file.path, trigger.path)) continue;
 				if (!file && trigger.path) continue;
@@ -253,7 +256,8 @@ export class WorkflowScheduler {
 		data?: unknown
 	): Promise<void> {
 		for (const workflow of this.getWorkflows()) {
-			for (const trigger of workflow.workflow?.triggers ?? []) {
+			if (!workflow.workflow?.enabled) continue;
+			for (const trigger of workflow.workflow.triggers) {
 				if (trigger.type !== "obsidian.metadata" || trigger.event !== event) continue;
 				if (file && !pathMatchesFilter(file.path, trigger.path)) continue;
 				if (!file && trigger.path) continue;
