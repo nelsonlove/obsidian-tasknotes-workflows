@@ -176,3 +176,41 @@ describe("shell.run step", () => {
 		await expect(step?.run({ command: "echo hi" }, ctx)).rejects.toThrow(/desktop/i);
 	});
 });
+
+describe("obsidian.runCommand step", () => {
+	function context(executeCommandById: (id: string) => boolean): StepExecutionContext {
+		return {
+			dryRun: false,
+			obsidian: { app: { commands: { executeCommandById } } },
+		} as unknown as StepExecutionContext;
+	}
+
+	it("registers with a commandId input and ran/commandId outputs, ungated", () => {
+		const step = new StepRegistry().get("obsidian.runCommand");
+		expect(step?.category).toBe("Obsidian");
+		expect(step?.inputFields.map((field) => field.key)).toEqual(["commandId"]);
+		expect(step?.outputFields.map((field) => field.key)).toEqual(["ran", "commandId"]);
+	});
+
+	it("dispatches the command and reports whether it ran", async () => {
+		const step = new StepRegistry().get("obsidian.runCommand");
+		let dispatched = "";
+		const output = (await step?.run(
+			{ commandId: "editor:save-file" },
+			context((id) => {
+				dispatched = id;
+				return true;
+			})
+		)) as { ran: boolean; commandId: string };
+		expect(dispatched).toBe("editor:save-file");
+		expect(output).toEqual({ ran: true, commandId: "editor:save-file" });
+	});
+
+	it("reports ran=false for an unknown command", async () => {
+		const step = new StepRegistry().get("obsidian.runCommand");
+		const output = (await step?.run({ commandId: "nope:missing" }, context(() => false))) as {
+			ran: boolean;
+		};
+		expect(output.ran).toBe(false);
+	});
+});

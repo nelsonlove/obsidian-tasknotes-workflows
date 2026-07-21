@@ -895,6 +895,40 @@ function createDefaultSteps(): StepDefinition[] {
 				});
 			},
 		},
+		obsidianStep(
+			"obsidian.runCommand",
+			"Run command",
+			"Dispatches an Obsidian command by its id (including commands from other plugins). Returns whether the command was found and run.",
+			async (app, input) => {
+				const commandId = requiredString(asRecord(input), "commandId");
+				const commands = (app as unknown as {
+					commands: { executeCommandById(id: string): boolean };
+				}).commands;
+				const ran = commands.executeCommandById(commandId);
+				return { ran, commandId };
+			},
+			{
+				category: "Obsidian",
+				inputFields: [
+					{
+						key: "commandId",
+						label: "Command ID",
+						type: "text",
+						required: true,
+						wide: true,
+						placeholder: "plugin-id:command-id",
+					},
+				],
+				outputFields: [
+					{ key: "ran", label: "Ran", type: "boolean" },
+					{ key: "commandId", label: "Command ID", type: "string" },
+				],
+				examples: [
+					{ label: "Save the active file", input: { commandId: "editor:save-file" } },
+					{ label: "Open another plugin's command", input: { commandId: "obsidian-importer:open-modal" } },
+				],
+			}
+		),
 	];
 }
 
