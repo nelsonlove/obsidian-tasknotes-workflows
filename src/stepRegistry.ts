@@ -1,5 +1,7 @@
 import { normalizePath, Notice, TFile } from "obsidian";
+import * as obsidianModule from "obsidian";
 import { conditionMatches, conditionsMatch } from "./conditions";
+import { getCodeStepPolicy } from "./codePolicy";
 import { DEFAULT_SOURCE } from "./constants";
 import { defaultRuntimeTaskQuery } from "./taskQuery";
 import { resolveTemplateValue } from "./template";
@@ -739,6 +741,53 @@ function createDefaultSteps(): StepDefinition[] {
 			supportsForEach: true,
 			run: async (input) => ({ stopped: true, reason: optionalString(input, "reason") }),
 		},
+		obsidianStep(
+			"js.run",
+			"Run JavaScript",
+			'Evaluate a JavaScript snippet with access to the Obsidian app; awaits and returns its result. Requires "Allow code steps" in settings.',
+			async (app, input, context) => {
+				if (!getCodeStepPolicy().enabled) {
+					throw new Error(
+						'Code steps are disabled. Enable "Allow code steps" in TaskNotes Workflows settings to run js.run.'
+					);
+				}
+				const record = asRecord(input);
+				const code = requiredString(record, "code");
+				const nodeRequire =
+					typeof window !== "undefined"
+						? (window as unknown as { require?: unknown }).require
+						: undefined;
+				const AsyncFunction = (async () => undefined).constructor as unknown as new (
+					...names: string[]
+				) => (...args: unknown[]) => Promise<unknown>;
+				const fn = new AsyncFunction("app", "obsidian", "input", "context", "require", code);
+				const result = await fn(app, obsidianModule, record, context, nodeRequire);
+				return { result: result ?? null };
+			},
+			{
+				category: "Obsidian",
+				inputFields: [
+					{
+						key: "code",
+						label: "JavaScript",
+						type: "textarea",
+						required: true,
+						wide: true,
+						defaultValue:
+							"// In scope: app, obsidian, input, context, require (desktop only).\n// Return a value to expose it as `result`. {{...}} templates resolve first.\nreturn app.vault.getMarkdownFiles().length;",
+					},
+				],
+				outputFields: [{ key: "result", label: "Result", type: "json" }],
+				examples: [
+					{ label: "Count markdown notes", input: { code: "return app.vault.getMarkdownFiles().length;" } },
+					{
+						label: "Run another Obsidian command",
+						input: { code: 'return app.commands.executeCommandById("editor:save-file");' },
+					},
+				],
+				writes: true,
+			}
+		),
 	];
 }
 

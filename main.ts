@@ -6,6 +6,7 @@ import { WorkflowScheduler } from "./src/scheduler";
 import { DEFAULT_SETTINGS, normalizeSettings } from "./src/settings";
 import { WorkflowsSettingsTab } from "./src/settingsTab";
 import { StepRegistry } from "./src/stepRegistry";
+import { setCodeStepPolicy } from "./src/codePolicy";
 import { TaskNotesBridge } from "./src/tasknotesBridge";
 import { WORKFLOW_BASE_VIEW_TYPE } from "./src/constants";
 import { isWorkflowPath } from "./src/path";
@@ -134,10 +135,12 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 	async loadSettings(): Promise<void> {
 		const loaded = (await this.loadData()) as Partial<TaskNotesWorkflowsSettings> | null;
 		this.settings = normalizeSettings(loaded ?? {});
+		setCodeStepPolicy({ enabled: this.settings.enableCodeSteps });
 	}
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
+		setCodeStepPolicy({ enabled: this.settings.enableCodeSteps });
 	}
 
 	async saveSettingsAndReload(): Promise<void> {

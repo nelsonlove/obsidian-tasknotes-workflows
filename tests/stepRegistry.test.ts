@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { StepRegistry } from "../src/stepRegistry";
+import { setCodeStepPolicy } from "../src/codePolicy";
+import type { StepExecutionContext } from "../src/types";
 
 describe("step registry", () => {
 	it("localizes step metadata with fallback to built-in English", () => {
@@ -45,5 +47,47 @@ describe("step registry", () => {
 		expect(createNote?.inputFields.map((field) => field.key)).toEqual(["path", "content"]);
 		expect(createNote?.mutatesTasks).toBe(false);
 		expect(createNote?.writesVault).toBe(true);
+	});
+});
+
+describe("js.run step", () => {
+	afterEach(() => setCodeStepPolicy({ enabled: false }));
+
+	function context(app: unknown): StepExecutionContext {
+		return { dryRun: false, obsidian: { app } } as unknown as StepExecutionContext;
+	}
+
+	it("registers with a code input, a result output, and marks itself as writing the vault", () => {
+		const step = new StepRegistry().get("js.run");
+		expect(step?.category).toBe("Obsidian");
+		expect(step?.inputFields.map((field) => field.key)).toEqual(["code"]);
+		expect(step?.outputFields.map((field) => field.key)).toEqual(["result"]);
+		expect(step?.writesVault).toBe(true);
+	});
+
+	it("refuses to execute when code steps are disabled", async () => {
+		setCodeStepPolicy({ enabled: false });
+		const step = new StepRegistry().get("js.run");
+		await expect(step?.run({ code: "return 1;" }, context({}))).rejects.toThrow(/disabled/i);
+	});
+
+	it("evaluates the snippet with app + input in scope and returns its result", async () => {
+		setCodeStepPolicy({ enabled: true });
+		const step = new StepRegistry().get("js.run");
+		const output = (await step?.run(
+			{ code: "return app.marker + input.n;", n: 8 },
+			context({ marker: 42 })
+		)) as { result: unknown };
+		expect(output.result).toBe(50);
+	});
+
+	it("does not execute during a dry run", async () => {
+		setCodeStepPolicy({ enabled: true });
+		const step = new StepRegistry().get("js.run");
+		const output = (await step?.run(
+			{ code: "throw new Error('should not run');" },
+			{ dryRun: true, obsidian: { app: {} } } as unknown as StepExecutionContext
+		)) as { dryRun?: boolean };
+		expect(output.dryRun).toBe(true);
 	});
 });

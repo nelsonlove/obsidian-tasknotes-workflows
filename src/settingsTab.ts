@@ -64,6 +64,18 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Allow code steps")
+			.setDesc(
+				"Let workflows run js.run / shell.run steps (arbitrary code). Off by default — only enable if you trust every workflow that can execute."
+			)
+			.addToggle((toggle) =>
+				toggle.setValue(this.workflowsPlugin.settings.enableCodeSteps).onChange((value) => {
+					this.workflowsPlugin.settings.enableCodeSteps = value;
+					void this.workflowsPlugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
 			.setName(this.workflowsPlugin.t("settings.workflowFiles.maintainDefaults.name"))
 			.setDesc(this.workflowsPlugin.t("settings.workflowFiles.maintainDefaults.description"))
 			.addButton((button) =>

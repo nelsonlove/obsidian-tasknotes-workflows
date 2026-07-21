@@ -15,6 +15,7 @@ export const DEFAULT_SETTINGS: TaskNotesWorkflowsSettings = {
 	maxHistoryEntries: 1000,
 	minIntervalMs: 60_000,
 	uiLanguage: "system",
+	enableCodeSteps: false,
 };
 
 export function normalizeSettings(input: Partial<TaskNotesWorkflowsSettings>): TaskNotesWorkflowsSettings {
