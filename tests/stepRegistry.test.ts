@@ -91,3 +91,88 @@ describe("js.run step", () => {
 		expect(output.dryRun).toBe(true);
 	});
 });
+
+describe("shell.run step", () => {
+	afterEach(() => setCodeStepPolicy({ enabled: false }));
+
+	const ctx = { dryRun: false, obsidian: { app: undefined } } as unknown as StepExecutionContext;
+
+	type ExecFileStub = (
+		file: string,
+		args: readonly string[],
+		options: unknown,
+		callback: (error: unknown, stdout: string, stderr: string) => void
+	) => void;
+
+	function withFakeChildProcess<T>(execFile: ExecFileStub, fn: () => Promise<T>): Promise<T> {
+		// eslint-disable-next-line obsidianmd/no-global-this -- stubbing the desktop `window.require` in a Node test
+		const holder = globalThis as { window?: unknown };
+		const original = holder.window;
+		holder.window = { require: (id: string) => (id === "child_process" ? { execFile } : undefined) };
+		return fn().finally(() => {
+			holder.window = original;
+		});
+	}
+
+	it("registers with command/cwd/timeout inputs and stdout/stderr/exit/ok outputs", () => {
+		const step = new StepRegistry().get("shell.run");
+		expect(step?.category).toBe("Obsidian");
+		expect(step?.inputFields.map((field) => field.key)).toEqual(["command", "cwd", "timeoutMs"]);
+		expect(step?.outputFields.map((field) => field.key)).toEqual(["stdout", "stderr", "exitCode", "ok"]);
+		expect(step?.writesVault).toBe(false);
+	});
+
+	it("refuses to execute when code steps are disabled", async () => {
+		setCodeStepPolicy({ enabled: false });
+		const step = new StepRegistry().get("shell.run");
+		await expect(step?.run({ command: "echo hi" }, ctx)).rejects.toThrow(/disabled/i);
+	});
+
+	it("does not execute during a dry run", async () => {
+		setCodeStepPolicy({ enabled: true });
+		const step = new StepRegistry().get("shell.run");
+		const output = (await step?.run({ command: "echo hi" }, { ...ctx, dryRun: true })) as {
+			dryRun?: boolean;
+		};
+		expect(output.dryRun).toBe(true);
+	});
+
+	it("runs the command through a login shell and returns stdout + exit 0", async () => {
+		setCodeStepPolicy({ enabled: true });
+		const step = new StepRegistry().get("shell.run");
+		let seenFile = "";
+		let seenArgs: readonly string[] = [];
+		const output = (await withFakeChildProcess(
+			(file, args, _options, callback) => {
+				seenFile = file;
+				seenArgs = args;
+				callback(null, "done\n", "");
+			},
+			() => step!.run({ command: "echo done" }, ctx)
+		)) as { stdout: string; exitCode: number; ok: boolean };
+		expect(seenFile).toBe("/bin/zsh");
+		expect(seenArgs).toEqual(["-lc", "echo done"]);
+		expect(output.stdout).toBe("done\n");
+		expect(output.exitCode).toBe(0);
+		expect(output.ok).toBe(true);
+	});
+
+	it("returns a non-zero exit code without throwing", async () => {
+		setCodeStepPolicy({ enabled: true });
+		const step = new StepRegistry().get("shell.run");
+		const output = (await withFakeChildProcess(
+			(_file, _args, _options, callback) =>
+				callback(Object.assign(new Error("exit 3"), { code: 3 }), "", "boom"),
+			() => step!.run({ command: "exit 3" }, ctx)
+		)) as { exitCode: number; ok: boolean; stderr: string };
+		expect(output.exitCode).toBe(3);
+		expect(output.ok).toBe(false);
+		expect(output.stderr).toBe("boom");
+	});
+
+	it("requires desktop Obsidian (throws when Node is unavailable)", async () => {
+		setCodeStepPolicy({ enabled: true });
+		const step = new StepRegistry().get("shell.run");
+		await expect(step?.run({ command: "echo hi" }, ctx)).rejects.toThrow(/desktop/i);
+	});
+});

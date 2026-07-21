@@ -1,4 +1,4 @@
-import { normalizePath, Notice, TFile } from "obsidian";
+import { FileSystemAdapter, normalizePath, Notice, TFile } from "obsidian";
 import * as obsidianModule from "obsidian";
 import { conditionMatches, conditionsMatch } from "./conditions";
 import { getCodeStepPolicy } from "./codePolicy";
@@ -788,6 +788,113 @@ function createDefaultSteps(): StepDefinition[] {
 				writes: true,
 			}
 		),
+		{
+			type: "shell.run",
+			label: "Run shell command",
+			description:
+				'Run a shell command through a login shell (desktop only); awaits it and returns stdout, stderr, and the exit code. Requires "Allow code steps" in settings.',
+			category: "Obsidian",
+			inputFields: [
+				{
+					key: "command",
+					label: "Command",
+					type: "textarea",
+					required: true,
+					wide: true,
+					defaultValue: 'echo "hello from $(pwd)"',
+				},
+				{
+					key: "cwd",
+					label: "Working directory",
+					type: "text",
+					required: false,
+					placeholder: "Absolute, or vault-relative; defaults to the vault root.",
+				},
+				{ key: "timeoutMs", label: "Timeout (ms)", type: "number", defaultValue: 120_000 },
+			],
+			outputFields: [
+				{ key: "stdout", label: "stdout", type: "string" },
+				{ key: "stderr", label: "stderr", type: "string" },
+				{ key: "exitCode", label: "Exit code", type: "number" },
+				{ key: "ok", label: "Succeeded", type: "boolean" },
+			],
+			examples: [
+				{ label: "Print the working directory", input: { command: "pwd" } },
+				{
+					label: "Run a vetted script with an argument",
+					input: { command: 'bin/import-apple-notes.sh "01.01 Inbox for 01 Capture & triage"' },
+				},
+			],
+			mutatesTasks: false,
+			writesVault: false,
+			supportsDryRun: true,
+			supportsForEach: true,
+			run: async (input, context) => {
+				if (context.dryRun) {
+					return { dryRun: true, wouldRun: "shell.run", input };
+				}
+				if (!getCodeStepPolicy().enabled) {
+					throw new Error(
+						'Code steps are disabled. Enable "Allow code steps" in TaskNotes Workflows settings to run shell.run.'
+					);
+				}
+				const record = asRecord(input);
+				const command = requiredString(record, "command");
+				const nodeRequire =
+					typeof window !== "undefined"
+						? (window as unknown as { require?: (id: string) => unknown }).require
+						: undefined;
+				if (typeof nodeRequire !== "function") {
+					throw new Error("shell.run requires desktop Obsidian (Node is unavailable on mobile).");
+				}
+				type ExecFileError = Error & { code?: number | string; killed?: boolean };
+				type ExecFileFn = (
+					file: string,
+					args: readonly string[],
+					options: { cwd?: string; timeout?: number; maxBuffer?: number; encoding?: string },
+					callback: (error: ExecFileError | null, stdout: string, stderr: string) => void
+				) => void;
+				const childProcess = nodeRequire("child_process") as { execFile: ExecFileFn };
+
+				const app = context.obsidian?.app;
+				const base =
+					app && app.vault.adapter instanceof FileSystemAdapter
+						? app.vault.adapter.getBasePath()
+						: undefined;
+				const cwdRaw = optionalString(record, "cwd")?.trim();
+				let cwd = cwdRaw || base;
+				if (cwdRaw && !cwdRaw.startsWith("/") && base) {
+					cwd = `${base}/${cwdRaw}`;
+				}
+				const timeoutRaw = record.timeoutMs;
+				const timeout = typeof timeoutRaw === "number" && timeoutRaw > 0 ? timeoutRaw : 120_000;
+
+				return await new Promise((resolve, reject) => {
+					childProcess.execFile(
+						"/bin/zsh",
+						["-lc", command],
+						{ cwd, timeout, maxBuffer: 16 * 1024 * 1024, encoding: "utf8" },
+						(error, stdout, stderr) => {
+							if (error && typeof error.code !== "number") {
+								reject(
+									new Error(
+										error.killed ? `shell.run timed out after ${timeout}ms` : error.message
+									)
+								);
+								return;
+							}
+							const exitCode = error ? (error.code as number) : 0;
+							resolve({
+								stdout: stdout ?? "",
+								stderr: stderr ?? "",
+								exitCode,
+								ok: exitCode === 0,
+							});
+						}
+					);
+				});
+			},
+		},
 	];
 }
 
