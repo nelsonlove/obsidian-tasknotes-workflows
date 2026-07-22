@@ -105,5 +105,6 @@ function settings(): TaskNotesWorkflowsSettings {
 		maxHistoryEntries: 100,
 		minIntervalMs: 60_000,
 		uiLanguage: "en",
+		enableCodeSteps: false,
 	};
 }
