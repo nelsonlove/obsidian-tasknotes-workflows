@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import type { MdbaseRuntimeHostApi } from "@callumalpass/mdbase-runtime";
 import { StepRegistry } from "../src/stepRegistry";
 import { WorkflowEngine } from "../src/workflowEngine";
 import type { LoadedWorkflow, TaskNotesRuntimeApi } from "../src/types";
+import type { TaskNotesBridge } from "../src/tasknotesBridge";
 
 function workflow(): LoadedWorkflow {
 	return {
 		file: { path: "TaskNotes/Workflows/test.md", basename: "test" } as LoadedWorkflow["file"],
 		body: "",
 		source: "",
-		sourceFormat: "runtime-v0.1",
+		sourceFormat: "runtime-v0.2",
 		diagnostics: [],
 		workflow: {
 			type: "workflow",
@@ -47,116 +47,102 @@ function workflow(): LoadedWorkflow {
 }
 
 describe("workflow engine", () => {
-	it("dispatches registered actions through the mdbase runtime host", async () => {
+	it("invokes a selected event/action contract provider and retains exact outcome evidence", async () => {
 		const loaded = workflow();
-		const localPatch = vi.fn();
-		const dispatch = vi.fn(async () => ({ path: "Tasks/a.md", status: "active" }));
-		const runtime = {
-			contracts: () => [{ type: "action", id: "task.patch" }],
-			preflight: () => ({ valid: true, diagnostics: [] }),
-			dispatch,
-		} as unknown as MdbaseRuntimeHostApi;
+		loaded.workflow!.steps = [{
+			id: "card",
+			type: "canvas.card.create",
+			contract: { version: "^1.0.0" },
+			provider: { application: "canvas-bases" },
+			input: {
+				canvas_path: "Completed.canvas",
+				card: { kind: "file", file: "{{event.data.task_path}}" },
+			},
+		}];
+		const invokeContractAction = vi.fn(async () => ({
+			kind: "mdbase.action.outcome",
+			profile_version: "0.1",
+			outcome_id: "out-1",
+			request_id: "req-1",
+			invocation_id: "inv-1",
+			attempt_id: "attempt-1",
+			contract: { id: "canvas.card.create", version: "1.0.0", digest: `sha256:${"a".repeat(64)}` },
+			provider: {
+				application: "canvas-bases",
+				implementation: "canvas-bases.obsidian",
+				version: "0.1.2",
+			},
+			provider_declaration_digest: `sha256:${"b".repeat(64)}`,
+			status: "succeeded",
+			completed_at: "2026-07-28T10:15:01.000Z",
+			output: { canvas_path: "Completed.canvas", card_id: "card-1", created: true },
+		}));
+		const bridge = {
+			interopDescription: () => ({
+				action_providers: [{
+					handlers: [{
+						resolved: {
+							id: "canvas.card.create",
+							version: "1.0.0",
+							digest: `sha256:${"a".repeat(64)}`,
+						},
+					}],
+				}],
+			}),
+			invokeContractAction,
+		} as unknown as TaskNotesBridge;
 		const engine = new WorkflowEngine(
 			new StepRegistry(),
-			() => ({ tasks: { patch: localPatch } }) as unknown as TaskNotesRuntimeApi,
+			() => null,
 			() => null,
 			(key) => key,
-			() => runtime
+			() => bridge,
 		);
 
 		const run = await engine.runWorkflow(loaded, {
-			trigger: { type: "manual", event: "manual", correlationId: "corr-1" },
+			trigger: {
+				type: "tasknotes.task.completed",
+				triggerType: "contract.event",
+				path: "Tasks/A.md",
+				correlationId: "corr-1",
+				data: { task_path: "Tasks/A.md", eventId: "evt-1" },
+			},
 		});
 
 		expect(run.status).toBe("success");
-		expect(dispatch).toHaveBeenCalledWith(
-			"task.patch",
-			{ task: "Tasks/a.md", patch: { status: "active" } },
-			expect.objectContaining({
-				origin: { workflow: "test", path: "TaskNotes/Workflows/test.md" },
-				correlation_id: "corr-1",
-				executor: "tasknotes-workflows",
-			})
-		);
-		expect(localPatch).not.toHaveBeenCalled();
-	});
-
-	it("does not bypass a runtime policy denial through the local step adapter", async () => {
-		const localPatch = vi.fn();
-		const dispatch = vi.fn();
-		const runtime = {
-			contracts: () => [{ type: "action", id: "task.patch" }],
-			preflight: () => ({
-				valid: false,
-				diagnostics: [{ code: "capability_denied", message: "Denied by policy", severity: "error" as const }],
-			}),
-			dispatch,
-		} as unknown as MdbaseRuntimeHostApi;
-		const engine = new WorkflowEngine(
-			new StepRegistry(),
-			() => ({ tasks: { patch: localPatch } }) as unknown as TaskNotesRuntimeApi,
-			() => null,
-			(key) => key,
-			() => runtime
-		);
-
-		const run = await engine.runWorkflow(workflow(), {
-			trigger: { type: "manual", event: "manual" },
+		expect(invokeContractAction).toHaveBeenCalledWith(expect.objectContaining({
+			contract: { id: "canvas.card.create", version: "^1.0.0" },
+			requested_provider: { application: "canvas-bases" },
+			correlation_id: "corr-1",
+			causation_id: "evt-1",
+			subject: "Tasks/A.md",
+			input: {
+				canvas_path: "Completed.canvas",
+				card: { kind: "file", file: "Tasks/A.md" },
+			},
+		}));
+		expect(run.steps[0]).toMatchObject({
+			output: { card_id: "card-1", created: true },
+			evidence: {
+				status: "succeeded",
+				contract: { id: "canvas.card.create", version: "1.0.0" },
+				provider: { application: "canvas-bases" },
+			},
 		});
-
-		expect(run.status).toBe("failed");
-		expect(run.error).toContain("capability_denied");
-		expect(localPatch).not.toHaveBeenCalled();
-		expect(dispatch).not.toHaveBeenCalled();
 	});
 
-	it("does not bypass the runtime host when action preflight throws", async () => {
-		const localPatch = vi.fn();
-		const dispatch = vi.fn();
-		const runtime = {
-			contracts: () => [{ type: "action", id: "task.patch" }],
-			preflight: () => { throw new Error("Host policy unavailable"); },
-			dispatch,
-		} as unknown as MdbaseRuntimeHostApi;
-		const engine = new WorkflowEngine(
-			new StepRegistry(),
-			() => ({ tasks: { patch: localPatch } }) as unknown as TaskNotesRuntimeApi,
-			() => null,
-			(key) => key,
-			() => runtime
-		);
-
-		const run = await engine.runWorkflow(workflow(), {
-			trigger: { type: "manual", event: "manual" },
-		});
-
-		expect(run.status).toBe("failed");
-		expect(run.error).toContain("Host policy unavailable");
-		expect(localPatch).not.toHaveBeenCalled();
-		expect(dispatch).not.toHaveBeenCalled();
-	});
-
-	it("fails workflow preflight before any step runs", async () => {
+	it("checks local TaskNotes capability requirements before any step runs", async () => {
 		const loaded = workflow();
 		loaded.workflow!.requires = {
-			providers: [{ id: "canvas-bases", version: ">=1.0.0" }],
 			capabilities: ["task.patch"],
 		};
 		const patch = vi.fn();
-		const preflight = vi.fn(() => ({
-			valid: false,
-			diagnostics: [
-				{ code: "provider_unavailable", message: "Required provider canvas-bases is not registered.", severity: "error" as const },
-			],
-		}));
-		const api = { tasks: { patch } } as unknown as TaskNotesRuntimeApi;
-		const runtime = { preflight } as unknown as MdbaseRuntimeHostApi;
+		const api = { capabilities: [], tasks: { patch } } as unknown as TaskNotesRuntimeApi;
 		const engine = new WorkflowEngine(
 			new StepRegistry(),
 			() => api,
 			() => null,
-			(key) => key,
-			() => runtime
+			(key) => key
 		);
 
 		const run = await engine.runWorkflow(loaded, {
@@ -164,7 +150,7 @@ describe("workflow engine", () => {
 		});
 
 		expect(run.status).toBe("failed");
-		expect(run.error).toContain("provider_unavailable");
+		expect(run.error).toContain("task.patch");
 		expect(run.steps).toEqual([]);
 		expect(patch).not.toHaveBeenCalled();
 	});

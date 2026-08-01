@@ -34,7 +34,6 @@ import type {
 	StepDefinition,
 	TaskNotesRuntimeCondition,
 	TaskNotesEventTrigger,
-	MdbaseRuntimeEventTrigger,
 	TaskNotesRuntimeEventDefinition,
 	TaskNotesRuntimeFilterOperatorDefinition,
 	TaskNotesRuntimeFilterPropertyDefinition,
@@ -61,6 +60,7 @@ type TriggerControls = {
 	typeSelect: HTMLSelectElement;
 	eventInput?: HTMLInputElement | HTMLSelectElement;
 	providerInput?: HTMLInputElement;
+	versionInput?: HTMLInputElement;
 	scheduleInput?: HTMLInputElement;
 	timezoneInput?: HTMLInputElement;
 	fromInput?: HTMLInputElement;
@@ -136,7 +136,7 @@ const DEFAULT_TASKNOTES_EVENTS: readonly TaskNotesRuntimeEventDefinition[] = [
 const TRIGGER_TYPE_KEYS: Record<WorkflowTrigger["type"], string> = {
 	manual: "manual",
 	"tasknotes.event": "tasknotesEvent",
-	"runtime.event": "runtimeEvent",
+	"contract.event": "contractEvent",
 	cron: "cron",
 	interval: "interval",
 	"obsidian.vault": "obsidianVault",
@@ -442,6 +442,7 @@ export class WorkflowEditModal extends Modal {
 				type: typeSelect.value as WorkflowTrigger["type"],
 				event: controls.eventInput?.value ?? triggerEventValue(trigger),
 				provider: controls.providerInput?.value ?? triggerProviderValue(trigger),
+				version: controls.versionInput?.value ?? triggerVersionValue(trigger),
 				schedule: controls.scheduleInput?.value ?? triggerScheduleValue(trigger),
 				timezone: controls.timezoneInput?.value ?? triggerTimezoneValue(trigger),
 				from: controls.fromInput?.value ?? ("from" in trigger ? stringifyScalar(trigger.from) : ""),
@@ -496,27 +497,36 @@ export class WorkflowEditModal extends Modal {
 			controls.allowSelfTriggerInput = renderCheckboxInput(advancedParent, this.t("editor.triggers.allowSelfTrigger"), trigger.allowSelfTrigger === true);
 			return;
 		}
-		if (trigger.type === "runtime.event") {
+		if (trigger.type === "contract.event") {
 			controls.eventInput = renderTextInput(
 				parent,
-				this.t("editor.triggers.event"),
-				trigger.event
+				this.t("editor.triggers.contract"),
+				trigger.contract
 			);
-			controls.eventInput.placeholder = "canvas.drop";
+			// Contract identifiers are case-sensitive machine names.
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
+			controls.eventInput.placeholder = "tasknotes.task.completed";
+			controls.versionInput = renderTextInput(
+				parent,
+				this.t("editor.triggers.contractVersion"),
+				trigger.version
+			);
+			controls.versionInput.placeholder = "^1.0.0";
 			controls.providerInput = renderTextInput(
 				advancedParent,
-				this.t("editor.triggers.runtimeProvider"),
-				trigger.provider ?? ""
+				this.t("editor.triggers.sourceApplication"),
+				trigger.source ?? ""
 			);
-			// Runtime provider identifiers are case-sensitive machine names.
+			// Application identifiers are case-sensitive machine names.
 			// eslint-disable-next-line obsidianmd/ui/sentence-case
-			controls.providerInput.placeholder = "canvas-bases";
+			controls.providerInput.placeholder = "tasknotes";
 			controls.pathInput = renderTextInput(
 				advancedParent,
 				this.t("editor.triggers.pathGlob"),
 				trigger.path?.glob ?? ""
 			);
-			this.renderValidation(controls.eventInput, `trigger.${index}.event`);
+			this.renderValidation(controls.eventInput, `trigger.${index}.contract`);
+			this.renderValidation(controls.versionInput, `trigger.${index}.version`);
 			return;
 		}
 		if (trigger.type === "cron") {
@@ -625,7 +635,7 @@ export class WorkflowEditModal extends Modal {
 	}
 
 	private renderStepCard(parent: HTMLElement, step: WorkflowStep, index: number): void {
-		const definition = this.plugin.stepRegistry.get(step.type);
+		const definition = this.stepDefinition(step.type);
 		const card = parent.createDiv({ cls: "tnw-edit-card" });
 		const isOpen = this.openStepIds.has(step.id);
 		card.toggleClass("is-active", isOpen);
@@ -703,6 +713,35 @@ export class WorkflowEditModal extends Modal {
 			currentStepId = id;
 		});
 		this.renderValidation(idInput, `step.${index}.id`);
+
+		if (this.plugin.interopStepDefinitions().some((candidate) => candidate.type === step.type)) {
+			const versionInput = renderTextInput(
+				advancedGrid,
+				this.t("editor.steps.contractVersion"),
+				step.contract?.version ?? "*"
+			);
+			versionInput.placeholder = "^1.0.0";
+			versionInput.addEventListener("input", () => {
+				step.contract = {
+					...(step.contract ?? {}),
+					version: versionInput.value.trim() || "*",
+				};
+			});
+			const providerInput = renderTextInput(
+				advancedGrid,
+				this.t("editor.steps.providerApplication"),
+				step.provider?.application ?? ""
+			);
+			// Application identifiers are case-sensitive machine names.
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
+			providerInput.placeholder = "canvas-bases";
+			providerInput.addEventListener("input", () => {
+				const application = providerInput.value.trim();
+				step.provider = application
+					? { ...(step.provider ?? {}), application }
+					: undefined;
+			});
+		}
 
 		if (definition?.supportsForEach !== false) {
 			const forEach = renderTextInput(advancedGrid, this.t("editor.steps.forEach"), forEachInputValue(step));
@@ -1609,7 +1648,7 @@ export class WorkflowEditModal extends Modal {
 			}
 		}
 		for (const step of this.draft.steps) {
-			const definition = this.plugin.stepRegistry.get(step.type);
+			const definition = this.stepDefinition(step.type);
 			if (!definition) continue;
 			for (const output of definition.outputFields) {
 				options.push({
@@ -1701,7 +1740,8 @@ export class WorkflowEditModal extends Modal {
 			if (triggerIds.has(trigger.id)) add(`trigger.${index}.id`, this.t("editor.validation.duplicateTriggerId"));
 			triggerIds.add(trigger.id);
 			if (isTaskNotesEventTrigger(trigger) && !trigger.event.trim()) add(`trigger.${index}.event`, this.t("editor.validation.tasknotesEventRequired"));
-			if (trigger.type === "runtime.event" && !trigger.event.trim()) add(`trigger.${index}.event`, this.t("editor.validation.runtimeEventRequired"));
+			if (trigger.type === "contract.event" && !trigger.contract.trim()) add(`trigger.${index}.contract`, this.t("editor.validation.contractRequired"));
+			if (trigger.type === "contract.event" && !trigger.version.trim()) add(`trigger.${index}.version`, this.t("editor.validation.contractVersionRequired"));
 			if (trigger.type === "cron" && !trigger.schedule.trim()) add(`trigger.${index}.schedule`, this.t("editor.validation.cronScheduleRequired"));
 			if (trigger.type === "interval" && !trigger.every.trim()) add(`trigger.${index}.schedule`, this.t("editor.validation.intervalRequired"));
 		}
@@ -1806,12 +1846,22 @@ export class WorkflowEditModal extends Modal {
 			existing.push(step);
 			groups.set(category, existing);
 		}
+		for (const step of this.plugin.interopStepDefinitions()) {
+			const existing = groups.get(step.category) ?? [];
+			if (!existing.some((candidate) => candidate.type === step.type)) existing.push(step);
+			groups.set(step.category, existing);
+		}
 		return Array.from(groups.entries())
 			.sort(([left], [right]) => left.localeCompare(right))
 			.map(([category, steps]) => ({
 				category,
 				steps: steps.sort((left, right) => left.label.localeCompare(right.label)),
 			}));
+	}
+
+	private stepDefinition(type: string): StepDefinition | undefined {
+		return this.plugin.stepRegistry.get(type)
+			?? this.plugin.interopStepDefinitions().find((step) => step.type === type);
 	}
 
 	private tasknotesEventOptions(selectedEvent?: string): Array<[string, string]> {
@@ -1867,7 +1917,7 @@ export class WorkflowEditModal extends Modal {
 			}
 			return this.tasknotesEventLabel(trigger.event);
 		}
-		if (trigger.type === "runtime.event") return trigger.event;
+		if (trigger.type === "contract.event") return `${trigger.contract} ${trigger.version}`;
 		if (trigger.type === "cron") return this.t("editor.triggers.summary.schedule", { schedule: trigger.schedule });
 		if (trigger.type === "interval") return this.t("editor.triggers.summary.every", { every: trigger.every });
 		if (trigger.type === "obsidian.vault") return this.t("editor.triggers.summary.vaultFile", { event: trigger.event });
@@ -1918,7 +1968,7 @@ export class WorkflowEditModal extends Modal {
 				output("correlationId", "string"),
 			];
 		}
-		if (trigger.type === "runtime.event") {
+		if (trigger.type === "contract.event") {
 			return [
 				...common,
 				output("path", "string"),
@@ -2356,6 +2406,7 @@ function triggerControlsInputs(controls: TriggerControls): Array<HTMLInputElemen
 		controls.idInput,
 		controls.eventInput,
 		controls.providerInput,
+		controls.versionInput,
 		controls.scheduleInput,
 		controls.timezoneInput,
 		controls.fromInput,
@@ -2374,15 +2425,12 @@ function isTaskNotesEventTriggerType(type: WorkflowTrigger["type"]): type is Tas
 	return type === "tasknotes.event";
 }
 
-function isRuntimeEventTriggerType(type: WorkflowTrigger["type"]): type is MdbaseRuntimeEventTrigger["type"] {
-	return type === "runtime.event";
-}
-
 function triggerFromControls(input: {
 	id: string;
 	type: WorkflowTrigger["type"];
 	event: string;
 	provider: string;
+	version: string;
 	schedule: string;
 	timezone: string;
 	from: string;
@@ -2404,12 +2452,13 @@ function triggerFromControls(input: {
 			allowSelfTrigger: input.allowSelfTrigger || undefined,
 		};
 	}
-	if (isRuntimeEventTriggerType(input.type)) {
+	if (input.type === "contract.event") {
 		return {
 			id,
-			type: "runtime.event",
-			event: input.event.trim() || "canvas.drop",
-			provider: input.provider.trim() || undefined,
+			type: "contract.event",
+			contract: input.event.trim() || "tasknotes.task.completed",
+			version: input.version.trim() || "^1.0.0",
+			source: input.provider.trim() || undefined,
 			path,
 		};
 	}
@@ -2448,6 +2497,7 @@ function triggerFromControls(input: {
 }
 
 function triggerEventValue(trigger: WorkflowTrigger): string {
+	if (trigger.type === "contract.event") return trigger.contract;
 	if ("event" in trigger) return String(trigger.event);
 	return "";
 }
@@ -2459,7 +2509,12 @@ function triggerScheduleValue(trigger: WorkflowTrigger): string {
 }
 
 function triggerProviderValue(trigger: WorkflowTrigger): string {
-	return trigger.type === "runtime.event" ? trigger.provider ?? "" : "";
+	if (trigger.type === "contract.event") return trigger.source ?? "";
+	return "";
+}
+
+function triggerVersionValue(trigger: WorkflowTrigger): string {
+	return trigger.type === "contract.event" ? trigger.version : "";
 }
 
 function triggerTimezoneValue(trigger: WorkflowTrigger): string {

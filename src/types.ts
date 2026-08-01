@@ -1,8 +1,5 @@
 import type { App, EventRef, TFile } from "obsidian";
-import type {
-	MdbaseProviderRequirement,
-	MdbaseRuntimeEventEnvelope,
-} from "@callumalpass/mdbase-runtime";
+import type { ProviderSelector } from "@callumalpass/mdbase-interop";
 
 export interface TaskNotesWorkflowsSettings {
 	workflowFolder: string;
@@ -40,7 +37,7 @@ export interface LoadedWorkflow {
 	lastRun?: RunSummary;
 }
 
-export type WorkflowSourceFormat = "runtime-v0.1" | "tasknotes-v1" | "tasknotes-v0.1" | "unknown";
+export type WorkflowSourceFormat = "runtime-v0.2" | "tasknotes-v1" | "tasknotes-v0.1" | "unknown";
 
 export interface WorkflowDiagnostic {
 	severity: "error" | "warning";
@@ -68,12 +65,11 @@ export interface WorkflowDefinition {
 
 export interface WorkflowRequires {
 	capabilities?: string[];
-	providers?: MdbaseProviderRequirement[];
 }
 
 export type WorkflowTrigger =
 	| TaskNotesEventTrigger
-	| MdbaseRuntimeEventTrigger
+	| ContractEventTrigger
 	| CronTrigger
 	| IntervalTrigger
 	| ManualTrigger
@@ -98,10 +94,11 @@ export interface TaskNotesEventTrigger extends WorkflowTriggerBase {
 	allowSelfTrigger?: boolean;
 }
 
-export interface MdbaseRuntimeEventTrigger extends WorkflowTriggerBase {
-	type: "runtime.event";
-	event: string;
-	provider?: string;
+export interface ContractEventTrigger extends WorkflowTriggerBase {
+	type: "contract.event";
+	contract: string;
+	version: string;
+	source?: string;
 	path?: PathFilter;
 }
 
@@ -184,6 +181,11 @@ export interface WorkflowStep {
 	if?: WorkflowCondition | WorkflowCondition[];
 	forEach?: WorkflowForEach;
 	requires?: WorkflowRequires;
+	contract?: {
+		version?: string;
+		digest?: string;
+	};
+	provider?: ProviderSelector;
 	extensions?: Record<`x-${string}`, unknown>;
 }
 
@@ -291,6 +293,7 @@ export interface StepRunDetail {
 	sourceInput?: unknown;
 	input?: unknown;
 	output?: unknown;
+	evidence?: unknown;
 	error?: string;
 	errorCode?: string;
 	errorStatus?: number;
@@ -490,7 +493,6 @@ export interface TaskNotesRuntimeApi {
 	};
 }
 
-export type TaskNotesMdbaseRuntimeEventEnvelope = MdbaseRuntimeEventEnvelope;
 
 export interface TaskNotesRuntimeCatalogOption {
 	id?: string;

@@ -16,10 +16,9 @@ import { buildWorkflowBasesViewFactory, WorkflowBasesView } from "./src/workflow
 import { refreshWorkflowNoteCards, registerWorkflowNoteCards } from "./src/workflowNoteCard";
 import { WorkflowEditModal } from "./src/workflowEditModal";
 import { createI18nService, I18nService, type InterpolationValues } from "./src/i18n";
-import { createWorkflowsRuntimeProvider, WORKFLOW_RUN_ACTION } from "./src/runtimeProvider";
+import { createWorkflowsActionProvider } from "./src/interopProvider";
 import { WorkflowMigrationService } from "./src/workflowMigration";
 import { WorkflowMigrationModal } from "./src/workflowMigrationModal";
-import { workflowToRuntimeRecord } from "./src/workflowFormat";
 import type {
 	LoadedWorkflow,
 	RunSummary,
@@ -30,10 +29,10 @@ import type {
 	TaskNotesRuntimeQueryValidationResult,
 	TaskNotesWorkflowsSettings,
 	WorkflowDynamicFieldOptions,
-	WorkflowDefinition,
 	WorkflowFieldOption,
 	WorkflowRunDetail,
 	WorkflowRunOptions,
+	StepDefinition,
 	WorkflowsRuntimeApi,
 } from "./src/types";
 
@@ -55,6 +54,7 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 	private manualWorkflowCommandIds = new Set<string>();
 	private workflowsRibbonEl: HTMLElement | null = null;
 	private tasknotesRuntimeAvailable = false;
+	private mdbaseInteropAvailable = false;
 	private tasknotesLifecycleRegistered = false;
 
 	get workflows(): LoadedWorkflow[] {
@@ -63,6 +63,37 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 
 	get tasknotesAvailable(): boolean {
 		return this.bridge.available;
+	}
+
+	interopStepDefinitions(): StepDefinition[] {
+		const description = this.bridge?.interopDescription();
+		if (!description) return [];
+		const provided = new Set(
+			description.action_providers.flatMap((provider) =>
+				provider.handlers.map((handler) => `${handler.resolved.id}\u0000${handler.resolved.version}`)
+			)
+		);
+		return description.contracts
+			.filter(({ artifact, reference }) =>
+				artifact.contract_type === "action"
+				&& provided.has(`${reference.id}\u0000${reference.version}`)
+			)
+			.map(({ artifact }) => ({
+				type: artifact.id,
+				label: artifact.name ?? artifact.id,
+				description: artifact.description ?? `Invoke the ${artifact.id} action contract.`,
+				category: "Interoperability",
+				inputFields: [],
+				outputFields: [],
+				examples: [],
+				mutatesTasks: false,
+				writesVault: true,
+				supportsDryRun: true,
+				supportsForEach: true,
+				run: async () => {
+					throw new Error("Interoperability actions are executed by the workflow engine.");
+				},
+			}));
 	}
 
 	override async onload(): Promise<void> {
@@ -78,7 +109,7 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 			this.refreshLocalizedUi();
 		});
 
-		this.bridge = new TaskNotesBridge(this.app);
+		this.bridge = new TaskNotesBridge(this.app, this);
 		this.repository = new WorkflowRepository(this.app, () => this.settings);
 		this.runLogs = new RunLogService(this.app, () => this.settings);
 		this.stepRegistry = new StepRegistry((key, params) => this.t(key, params));
@@ -87,7 +118,7 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 			() => this.bridge.api,
 			() => this.app,
 			(key, params) => this.t(key, params),
-			() => this.bridge.runtimeHost
+			() => this.bridge,
 		);
 		this.scheduler = new WorkflowScheduler(
 			this,
@@ -129,7 +160,8 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 		this.unregisterManualWorkflowCommands();
 		this.scheduler.stop();
 		this.bridge.unregisterExtension();
-		void this.bridge.unregisterRuntimeProvider();
+		void this.bridge.unregisterActionProvider();
+		void this.bridge.disposeInterop();
 	}
 
 	async loadSettings(): Promise<void> {
@@ -163,7 +195,7 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 	async reloadWorkflows(): Promise<void> {
 		this.loadedWorkflows = await this.repository.reload();
 		this.loadedWorkflows = await this.withLastRunSummaries(this.loadedWorkflows);
-		if (this.bridge?.runtimeHost) await this.refreshRuntimeProvider();
+		if (this.bridge?.interopAvailable) await this.refreshActionProvider();
 		this.scheduler.start();
 		this.refreshManualWorkflowCommands();
 		await this.renderWorkflowBaseViews();
@@ -509,41 +541,45 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 
 	private registerRuntimeExtension(): void {
 		this.bridge.registerExtension(this.runtimeApi(), this.manifest.version, this.t("common.appName"));
-		this.bridge.registerRuntimeProvider(this.createRuntimeProvider());
+		this.bridge.registerActionProvider(this.createActionProvider());
 	}
 
-	private createRuntimeProvider(): ReturnType<typeof createWorkflowsRuntimeProvider> {
-		return createWorkflowsRuntimeProvider({
-			version: this.manifest.version,
-			workflows: this.loadedWorkflows
-				.filter((loaded): loaded is LoadedWorkflow & { workflow: WorkflowDefinition } =>
-					loaded.sourceFormat === "runtime-v0.1" && loaded.workflow !== null
-				)
-				.map((loaded) => workflowToRuntimeRecord(loaded.workflow)),
+	private createActionProvider(): ReturnType<typeof createWorkflowsActionProvider> {
+		return createWorkflowsActionProvider({
 			runWorkflow: (workflowId, input) => this.runWorkflowById(workflowId, input),
 		});
 	}
 
-	private async refreshRuntimeProvider(): Promise<void> {
-		await this.bridge.replaceRuntimeProvider(this.createRuntimeProvider());
+	private async refreshActionProvider(): Promise<void> {
+		await this.bridge.replaceActionProvider(this.createActionProvider());
 	}
 
 	private refreshTaskNotesRuntimeState(): void {
 		const available = this.bridge.available;
+		const interopAvailable = this.bridge.interopAvailable;
+		const availabilityChanged =
+			available !== this.tasknotesRuntimeAvailable
+			|| interopAvailable !== this.mdbaseInteropAvailable;
+		this.mdbaseInteropAvailable = interopAvailable;
 		if (!available) {
 			if (this.tasknotesRuntimeAvailable) {
 				this.bridge.unregisterExtension();
-				void this.bridge.unregisterRuntimeProvider();
+				void this.bridge.unregisterActionProvider();
 				this.tasknotesLifecycleRegistered = false;
 			}
 			this.tasknotesRuntimeAvailable = false;
+			if (availabilityChanged) {
+				this.scheduler.start();
+				void this.renderWorkflowBaseViews();
+				refreshWorkflowNoteCards(this);
+			}
 			return;
 		}
 
 		this.registerRuntimeExtension();
 		this.registerTaskNotesLifecycleListeners();
 
-		if (!this.tasknotesRuntimeAvailable) {
+		if (availabilityChanged) {
 			this.scheduler.start();
 			void this.renderWorkflowBaseViews();
 			refreshWorkflowNoteCards(this);
@@ -595,17 +631,15 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 					supportsForEach: step.supportsForEach,
 				})),
 			runWorkflow: async (workflowId, input) =>
-				await this.bridge.dispatchRuntimeAction(WORKFLOW_RUN_ACTION, {
-					workflow_id: workflowId,
+				await this.runWorkflowById(workflowId, {
 					trigger: input?.trigger,
-					dry_run: false,
-				}) as WorkflowRunDetail,
+					dryRun: false,
+				}),
 			dryRunWorkflow: async (workflowId, input) =>
-				await this.bridge.dispatchRuntimeAction(WORKFLOW_RUN_ACTION, {
-					workflow_id: workflowId,
+				await this.runWorkflowById(workflowId, {
 					trigger: input?.trigger,
-					dry_run: true,
-				}) as WorkflowRunDetail,
+					dryRun: true,
+				}),
 			reloadWorkflows: async () => await this.reloadWorkflows(),
 			validateWorkflows: async () => {
 				await this.reloadWorkflows();

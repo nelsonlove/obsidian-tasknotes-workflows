@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateCanonicalSchema } from "@callumalpass/mdbase-runtime";
+import { validateRuntimeRecord } from "@callumalpass/mdbase-runtime";
 import { parse } from "yaml";
 import { parseMarkdownFrontmatter } from "../src/frontmatter";
 import { parseWorkflowDefinition, workflowToFrontmatter } from "../src/workflowParser";
@@ -46,6 +46,56 @@ run:
 		expect(result.sourceFormat).toBe("tasknotes-v1");
 	});
 
+	it("round-trips contract events and action provider selection", () => {
+		const result = parseWorkflowDefinition({
+			type: "workflow",
+			schemaVersion: 1,
+			id: "completed-to-canvas",
+			name: "Completed to canvas",
+			enabled: true,
+			triggers: [{
+				id: "completed",
+				type: "contract.event",
+				contract: "tasknotes.task.completed",
+				version: "^1.0.0",
+				source: "tasknotes",
+			}],
+			steps: [{
+				id: "card",
+				type: "canvas.card.create",
+				contract: { version: "^1.0.0" },
+				provider: { application: "canvas-bases" },
+				input: {
+					canvas_path: "Completed.canvas",
+					card: { kind: "file", file: "{{event.data.task_path}}" },
+				},
+			}],
+			run: {
+				mode: "sequential",
+				concurrency: { group: "workflow", policy: "queue" },
+				limits: { maxItems: 1 },
+				source: "tasknotes-workflows",
+				onError: "stop",
+			},
+		}, "");
+
+		expect(result.diagnostics).toEqual([]);
+		expect(result.workflow?.triggers[0]).toMatchObject({
+			type: "contract.event",
+			contract: "tasknotes.task.completed",
+			version: "^1.0.0",
+			source: "tasknotes",
+		});
+		const frontmatter = workflowToFrontmatter(result.workflow!);
+		const canonical = parseWorkflowDefinition(parse(frontmatter), frontmatter);
+		expect(canonical.diagnostics).toEqual([]);
+		expect(canonical.workflow?.steps[0]).toMatchObject({
+			type: "canvas.card.create",
+			contract: { version: "^1.0.0" },
+			provider: { application: "canvas-bases" },
+		});
+	});
+
 	it("writes canonical mdbase runtime workflow records and reads TaskNotes extensions", () => {
 		const legacy = parseWorkflowDefinition({
 			type: "tasknotes-workflow",
@@ -67,19 +117,26 @@ run:
 
 		const frontmatter = workflowToFrontmatter(legacy.workflow!);
 		const record = parse(frontmatter) as Record<string, unknown>;
-		expect(validateCanonicalSchema("workflow", record)).toMatchObject({ valid: true });
+		expect(validateRuntimeRecord(record)).toMatchObject({ valid: true });
 		expect(record).toMatchObject({
-			type: "workflow",
-			version: 1,
-			triggers: [{ id: "daily", event: "tasknotes-workflows.schedule.cron" }],
-			steps: [{ id: "show", action: "notice.show", for_each: { items: { $expr: "steps.query.output.tasks" } } }],
+			type: "runtime_workflow",
+			version: "1.0.0",
+			triggers: [{
+				id: "daily",
+				event: { id: "tasknotes-workflows.schedule.cron", version: "1.0.0" },
+			}],
+			steps: [{
+				id: "show",
+				action: { id: "notice.show", version: "1.0.0" },
+				for_each: { items: { $expr: "steps.query.output.tasks" } },
+			}],
 			run: { limits: { max_items: 10 }, on_error: "stop" },
 		});
 		expect(record).not.toHaveProperty("schemaVersion");
 
 		const canonical = parseWorkflowDefinition(record, frontmatter);
 		expect(canonical.diagnostics).toEqual([]);
-		expect(canonical.sourceFormat).toBe("runtime-v0.1");
+		expect(canonical.sourceFormat).toBe("runtime-v0.2");
 		expect(canonical.workflow?.triggers[0]).toMatchObject({ type: "cron", schedule: "0 9 * * *" });
 		expect(canonical.workflow?.steps[0]).toMatchObject({ type: "notice.show" });
 		expect(canonical.workflow?.conditions).toEqual([{ field: "event.path", operator: "exists" }]);
@@ -87,8 +144,8 @@ run:
 
 	it("rejects a noncanonical record that mixes runtime and TaskNotes version markers", () => {
 		const result = parseWorkflowDefinition({
-			type: "workflow",
-			version: 1,
+			type: "runtime_workflow",
+			version: "1.0.0",
 			schemaVersion: 1,
 			id: "ambiguous",
 			name: "Ambiguous",
@@ -137,7 +194,7 @@ run:
 		});
 	});
 
-	it("parses mdbase runtime event triggers and versioned provider requirements", () => {
+	it("uses contract requirements and explicit source selection for portable events", () => {
 		const result = parseWorkflowDefinition(
 			{
 				type: "workflow",
@@ -145,11 +202,14 @@ run:
 				id: "canvas-drop",
 				name: "Canvas drop",
 				enabled: true,
-				requires: {
-					providers: [{ id: "canvas-bases", version: ">=0.1.0 <1.0.0" }],
-				},
 				triggers: [
-					{ id: "drop", type: "runtime.event", event: "canvas.drop", provider: "canvas-bases" },
+					{
+						id: "drop",
+						type: "contract.event",
+						contract: "canvas.drop",
+						version: "^1.0.0",
+						source: "canvas-bases",
+					},
 				],
 				steps: [{ id: "notice", type: "notice.show", input: { message: "Dropped" } }],
 				run: {
@@ -164,13 +224,11 @@ run:
 		);
 
 		expect(result.diagnostics).toEqual([]);
-		expect(result.workflow?.requires?.providers).toEqual([
-			{ id: "canvas-bases", version: ">=0.1.0 <1.0.0" },
-		]);
 		expect(result.workflow?.triggers[0]).toMatchObject({
-			type: "runtime.event",
-			event: "canvas.drop",
-			provider: "canvas-bases",
+			type: "contract.event",
+			contract: "canvas.drop",
+			version: "^1.0.0",
+			source: "canvas-bases",
 		});
 	});
 
