@@ -1,11 +1,5 @@
 # Changelog
 
-## [0.1.5] - 2026-08-06
-
-### Added
-
-- Added an "Extra frontmatter properties" setting: an allowlist of frontmatter property names (one per line, default empty) that workflow validation silently accepts in both the legacy and runtime-v0.2 parse paths and that every workflow rewrite (editor save, explicit migration) preserves verbatim. This lets vault-convention frontmatter such as `uid` or `created` coexist with workflow frontmatter.
-
 ## Unreleased
 
 ### Fixed
@@ -27,6 +21,12 @@
 - New, edited, default, and explicitly migrated workflow files now validate and write the canonical Runtime profile 0.2 `runtime_workflow` shape. TaskNotes-only scheduler and editor state is stored under `x-tasknotes` extensions.
 - Legacy `tasknotes-workflow` and `schemaVersion: 1` files remain readable without mutation. Saving one through the editor is an explicit canonical conversion.
 - Local TaskNotes steps now execute only in TaskNotes Workflows, while portable actions execute only through the interoperability bridge. The obsolete private runtime-host fallback and uncontracted `runtime.event` trigger were removed.
+
+## [0.1.5] - 2026-08-06
+
+### Added
+
+- Added an "Extra frontmatter properties" setting: an allowlist of frontmatter property names (one per line, default empty) that workflow validation silently accepts in both the legacy and runtime-v0.2 parse paths and that every workflow rewrite (editor save, explicit migration) preserves verbatim. This lets vault-convention frontmatter such as `uid` or `created` coexist with workflow frontmatter. Workflow-owned schema keys cannot be allowlisted; the settings tab warns when a reserved name is entered.
 
 ## [0.1.1] - 2026-06-01
 
