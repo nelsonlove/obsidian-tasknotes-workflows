@@ -45,6 +45,19 @@ const TOP_LEVEL_FIELDS = new Set([
 	"extensions",
 ]);
 
+/**
+ * Keys the workflow formats own: the legacy top-level fields plus the
+ * runtime-v0.2 schema's `version`. These can never be allowlisted as extra
+ * frontmatter — stripping one before validation would make every workflow
+ * invalid with errors pointing at fields visibly present in the file.
+ * `x-` prefixed names are likewise owned (extension namespace).
+ */
+const RESERVED_FRONTMATTER_KEYS = new Set([...TOP_LEVEL_FIELDS, "version"]);
+
+export function isReservedFrontmatterKey(key: string): boolean {
+	return RESERVED_FRONTMATTER_KEYS.has(key) || key.startsWith("x-");
+}
+
 export interface WorkflowParseOptions {
 	/**
 	 * Frontmatter property names the plugin silently allows and preserves.
@@ -78,7 +91,7 @@ export function parseWorkflowDefinition(
 			],
 		};
 	}
-	const data = withoutAllowedFrontmatter(input, options.allowedFrontmatterKeys ?? []);
+	const data = partitionAllowedFrontmatter(input, options.allowedFrontmatterKeys ?? []).workflow;
 
 	if (sourceFormat === "runtime-v0.2") {
 		diagnostics.push(...validateRuntimeWorkflowRecord(data));
@@ -185,26 +198,40 @@ export function workflowToFrontmatter(
 }
 
 /**
+ * Splits parsed frontmatter into the workflow record and the allowlisted
+ * passthrough keys. Reserved workflow-owned keys (see
+ * {@link isReservedFrontmatterKey}) are never treated as allowlisted even if a
+ * caller passes them, so the workflow half always keeps every schema key.
+ */
+function partitionAllowedFrontmatter(
+	data: Record<string, unknown>,
+	allowedFrontmatterKeys: readonly string[]
+): { workflow: Record<string, unknown>; preserved: Record<string, unknown> } {
+	if (allowedFrontmatterKeys.length === 0) return { workflow: data, preserved: {} };
+	const allowed = new Set(allowedFrontmatterKeys);
+	const workflow: Record<string, unknown> = {};
+	const preserved: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(data)) {
+		if (allowed.has(key) && !isReservedFrontmatterKey(key)) {
+			preserved[key] = value;
+		} else {
+			workflow[key] = value;
+		}
+	}
+	return { workflow, preserved };
+}
+
+/**
  * Picks the allowlisted frontmatter properties present in parsed frontmatter,
  * so a write path can pass them to {@link workflowToFrontmatter} for verbatim
- * preservation. Keys owned by the workflow record itself always win collisions.
+ * preservation. Reserved workflow-owned keys are never picked.
  */
 export function pickAllowedFrontmatter(
 	data: unknown,
 	allowedFrontmatterKeys: readonly string[]
 ): Record<string, unknown> {
-	if (!isRecord(data) || allowedFrontmatterKeys.length === 0) return {};
-	const allowed = new Set(allowedFrontmatterKeys);
-	return Object.fromEntries(Object.entries(data).filter(([key]) => allowed.has(key)));
-}
-
-function withoutAllowedFrontmatter(
-	data: Record<string, unknown>,
-	allowedFrontmatterKeys: readonly string[]
-): Record<string, unknown> {
-	if (allowedFrontmatterKeys.length === 0) return data;
-	const allowed = new Set(allowedFrontmatterKeys);
-	return Object.fromEntries(Object.entries(data).filter(([key]) => !allowed.has(key)));
+	if (!isRecord(data)) return {};
+	return partitionAllowedFrontmatter(data, allowedFrontmatterKeys).preserved;
 }
 
 export function loadedWorkflowStatus(workflow: LoadedWorkflow): "enabled" | "disabled" | "invalid" {

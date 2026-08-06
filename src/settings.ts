@@ -1,4 +1,5 @@
 import { DEFAULT_WORKFLOW_FOLDER, DEFAULT_WORKFLOW_VIEW_PATH } from "./constants";
+import { isReservedFrontmatterKey } from "./workflowParser";
 import type { TaskNotesWorkflowsSettings } from "./types";
 
 export const DEFAULT_SETTINGS: TaskNotesWorkflowsSettings = {
@@ -40,7 +41,11 @@ export function normalizeAllowedFrontmatterKeys(input: unknown): string[] {
 	for (const value of input) {
 		if (typeof value !== "string") continue;
 		const key = value.trim();
-		if (key.length > 0 && !keys.includes(key)) keys.push(key);
+		if (key.length === 0 || keys.includes(key)) continue;
+		// Workflow-owned schema keys can never be allowlisted; stripping one
+		// before validation would invalidate every workflow in the vault.
+		if (isReservedFrontmatterKey(key)) continue;
+		keys.push(key);
 	}
 	return keys;
 }

@@ -445,6 +445,33 @@ describe("frontmatter allowlist", () => {
 		expect(reparsed.workflow?.id).toBe("auto-start");
 	});
 
+	it("treats reserved workflow-owned keys in the allowlist as inert", () => {
+		// Even a raw, un-normalized allowlist cannot strip schema keys: the
+		// legacy record keeps schemaVersion/type and parses as tasknotes-v1.
+		const result = parseWorkflowDefinition(legacyData(), "", {
+			allowedFrontmatterKeys: ["type", "schemaVersion", "version", "name", "uid"],
+		});
+		expect(result.diagnostics).toEqual([]);
+		expect(result.sourceFormat).toBe("tasknotes-v1");
+		expect(result.workflow?.name).toBe("Auto start");
+
+		// And a runtime record keeps type/version, so it still validates.
+		const runtime = parseWorkflowDefinition(runtimeData(), "", {
+			allowedFrontmatterKeys: ["type", "version"],
+		});
+		expect(runtime.diagnostics).toEqual([]);
+		expect(runtime.sourceFormat).toBe("runtime-v0.2");
+	});
+
+	it("never picks reserved keys for preservation", () => {
+		expect(
+			pickAllowedFrontmatter(
+				{ type: "runtime_workflow", version: "1.0.0", "x-tasknotes": {}, uid: "x" },
+				["type", "version", "x-tasknotes", "uid"]
+			)
+		).toEqual({ uid: "x" });
+	});
+
 	it("picks only allowlisted keys that are present", () => {
 		expect(pickAllowedFrontmatter({ uid: "x", name: "n" }, ["uid", "created"])).toEqual({ uid: "x" });
 		expect(pickAllowedFrontmatter({ uid: "x" }, [])).toEqual({});
