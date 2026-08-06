@@ -244,6 +244,10 @@
       "source": "7abebc79eff57f8daa4faa5d32b6b6f0ef600f06",
       "translation": "3cade2f55b600b6b0c3b3a19ca941a92de692e40"
     },
+    "settings.workflowFiles.allowedFrontmatterKeys.reservedIgnored": {
+      "source": "b23b5dfcb291416965fc8a9770aeb802627c634f",
+      "translation": "87b97a2dc1933568f8423adebcd962ec799455f9"
+    },
     "settings.triggers.heading": {
       "source": "047708b21883d20fa96e13ada1ae6a3f040a4c1c",
       "translation": "8326ab1f19ed759ccf66ffdad5d035f57cc6f86c"
@@ -2693,6 +2697,10 @@
     "settings.workflowFiles.allowedFrontmatterKeys.description": {
       "source": "7abebc79eff57f8daa4faa5d32b6b6f0ef600f06",
       "translation": "25e864b279de9c7a8f45422860a6a70b7b9e50e2"
+    },
+    "settings.workflowFiles.allowedFrontmatterKeys.reservedIgnored": {
+      "source": "b23b5dfcb291416965fc8a9770aeb802627c634f",
+      "translation": "de12e761ae983ee6c169aa8e6f28bd8867c1a803"
     },
     "settings.triggers.heading": {
       "source": "047708b21883d20fa96e13ada1ae6a3f040a4c1c",
@@ -5144,6 +5152,10 @@
       "source": "7abebc79eff57f8daa4faa5d32b6b6f0ef600f06",
       "translation": "0f65fe44d172d75c0ed5d35de3a6da47e012f2b1"
     },
+    "settings.workflowFiles.allowedFrontmatterKeys.reservedIgnored": {
+      "source": "b23b5dfcb291416965fc8a9770aeb802627c634f",
+      "translation": "83532428ec911c58b986fd4b6a73a6f166813382"
+    },
     "settings.triggers.heading": {
       "source": "047708b21883d20fa96e13ada1ae6a3f040a4c1c",
       "translation": "aeedf55c6bf2aca1f9dcaa5ac8c018b4be968316"
@@ -7593,6 +7605,10 @@
     "settings.workflowFiles.allowedFrontmatterKeys.description": {
       "source": "7abebc79eff57f8daa4faa5d32b6b6f0ef600f06",
       "translation": "06edc60211a6d6761663f210a02c7b728a8d1443"
+    },
+    "settings.workflowFiles.allowedFrontmatterKeys.reservedIgnored": {
+      "source": "b23b5dfcb291416965fc8a9770aeb802627c634f",
+      "translation": "a420b856f1dbfafb374b89bd77e1ce4255bad667"
     },
     "settings.triggers.heading": {
       "source": "047708b21883d20fa96e13ada1ae6a3f040a4c1c",
@@ -10044,6 +10060,10 @@
       "source": "7abebc79eff57f8daa4faa5d32b6b6f0ef600f06",
       "translation": "fa957f05755af1a2dc4521d71898c75222f8d007"
     },
+    "settings.workflowFiles.allowedFrontmatterKeys.reservedIgnored": {
+      "source": "b23b5dfcb291416965fc8a9770aeb802627c634f",
+      "translation": "74a741ce04afe2fe3017672777204f4cf08ce0fb"
+    },
     "settings.triggers.heading": {
       "source": "047708b21883d20fa96e13ada1ae6a3f040a4c1c",
       "translation": "861b3833e3ccb726c974441955e9bde1e417c68c"
@@ -12493,6 +12513,10 @@
     "settings.workflowFiles.allowedFrontmatterKeys.description": {
       "source": "7abebc79eff57f8daa4faa5d32b6b6f0ef600f06",
       "translation": "b01b9dccc5895f44212cd18e4a6c1f6beeac6458"
+    },
+    "settings.workflowFiles.allowedFrontmatterKeys.reservedIgnored": {
+      "source": "b23b5dfcb291416965fc8a9770aeb802627c634f",
+      "translation": "9e5ec8871206ac2fa11e4a90b2133b5f97fbdc2c"
     },
     "settings.triggers.heading": {
       "source": "047708b21883d20fa96e13ada1ae6a3f040a4c1c",
@@ -14944,6 +14968,10 @@
       "source": "7abebc79eff57f8daa4faa5d32b6b6f0ef600f06",
       "translation": "9695b24137aa874c5382c7dc065f48b0a7f500c4"
     },
+    "settings.workflowFiles.allowedFrontmatterKeys.reservedIgnored": {
+      "source": "b23b5dfcb291416965fc8a9770aeb802627c634f",
+      "translation": "8d5fd41aef71e441811831c4e90bb5e5d23cf59f"
+    },
     "settings.triggers.heading": {
       "source": "047708b21883d20fa96e13ada1ae6a3f040a4c1c",
       "translation": "a30dcbc987841071240bfcf9679150f33bd5ee6b"
@@ -17393,6 +17421,10 @@
     "settings.workflowFiles.allowedFrontmatterKeys.description": {
       "source": "7abebc79eff57f8daa4faa5d32b6b6f0ef600f06",
       "translation": "73e5e04b1ab6bea4b7d1cdbd8620779b96a647a6"
+    },
+    "settings.workflowFiles.allowedFrontmatterKeys.reservedIgnored": {
+      "source": "b23b5dfcb291416965fc8a9770aeb802627c634f",
+      "translation": "723c9d375022e8c4e19516d9eba95257bfe1d749"
     },
     "settings.triggers.heading": {
       "source": "047708b21883d20fa96e13ada1ae6a3f040a4c1c",

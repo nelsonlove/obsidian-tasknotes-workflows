@@ -89,6 +89,7 @@ export const es: TranslationTree = {
 			allowedFrontmatterKeys: {
 				name: "Propiedades adicionales del frontmatter",
 				description: "Nombres de propiedades del frontmatter, uno por línea, que la validación de flujos de trabajo permite silenciosamente y que se conservan al guardar. Úselo para mantener propiedades de convención del vault como uid o created en las notas de flujo de trabajo.",
+				reservedIgnored: "Se ignoraron propiedades reservadas del flujo de trabajo: {keys}",
 			},
 		},
 		triggers: {

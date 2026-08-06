@@ -89,6 +89,7 @@ export const zh: TranslationTree = {
 			allowedFrontmatterKeys: {
 				name: "额外的前置属性",
 				description: "工作流验证静默允许并在保存时保留的前置属性名称（每行一个）。用于在工作流笔记中保留 uid 或 created 等仓库约定属性。",
+				reservedIgnored: "已忽略保留的工作流属性：{keys}",
 			},
 		},
 		triggers: {

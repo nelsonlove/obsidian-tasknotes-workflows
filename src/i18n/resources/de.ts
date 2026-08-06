@@ -89,6 +89,7 @@ export const de: TranslationTree = {
 			allowedFrontmatterKeys: {
 				name: "Zusätzliche Frontmatter-Eigenschaften",
 				description: "Frontmatter-Eigenschaftsnamen, einer pro Zeile, die die Workflow-Validierung stillschweigend zulässt und die beim Speichern von Workflows erhalten bleiben. Verwenden Sie dies, um Vault-Konventionseigenschaften wie uid oder created in Workflow-Notizen zu behalten.",
+				reservedIgnored: "Reservierte Workflow-Eigenschaften wurden ignoriert: {keys}",
 			},
 		},
 		triggers: {

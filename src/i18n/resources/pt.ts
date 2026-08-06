@@ -89,6 +89,7 @@ export const pt: TranslationTree = {
 			allowedFrontmatterKeys: {
 				name: "Propriedades adicionais de frontmatter",
 				description: "Nomes de propriedades de frontmatter, um por linha, que a validação de fluxos de trabalho permite silenciosamente e que são preservados ao salvar. Use isto para manter propriedades de convenção do cofre, como uid ou created, nas notas de fluxo de trabalho.",
+				reservedIgnored: "Propriedades reservadas do fluxo de trabalho ignoradas: {keys}",
 			},
 		},
 		triggers: {
