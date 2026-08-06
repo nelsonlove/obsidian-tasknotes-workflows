@@ -1,5 +1,6 @@
 import { stringify } from "yaml";
 import { LEGACY_WORKFLOW_TYPE, WORKFLOW_TYPE } from "./constants";
+import { parseMarkdownFrontmatter } from "./frontmatter";
 import { isConditionOperator } from "./conditions";
 import { isWorkflowExpression, validateExpressionTree } from "./expressions";
 import {
@@ -245,6 +246,19 @@ export function pickAllowedFrontmatter(
 ): Record<string, unknown> {
 	if (!isRecord(data)) return {};
 	return partitionAllowedFrontmatter(data, allowedFrontmatterKeys).preserved;
+}
+
+/**
+ * Convenience for write paths: parses a workflow note's markdown source and
+ * returns the allowlisted frontmatter keys to preserve through a rewrite.
+ */
+export function preservedFrontmatterFromSource(
+	source: string,
+	allowedFrontmatterKeys: readonly string[]
+): Record<string, unknown> {
+	const parsed = parseMarkdownFrontmatter(source);
+	if (parsed.error) return {};
+	return pickAllowedFrontmatter(parsed.data, allowedFrontmatterKeys);
 }
 
 export function loadedWorkflowStatus(workflow: LoadedWorkflow): "enabled" | "disabled" | "invalid" {

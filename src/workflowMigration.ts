@@ -1,7 +1,7 @@
 import { normalizePath, TFile, type App } from "obsidian";
 import { parseMarkdownFrontmatter, replaceMarkdownFrontmatter } from "./frontmatter";
 import type { WorkflowRepository } from "./workflowRepository";
-import { parseWorkflowDefinition, pickAllowedFrontmatter, workflowToFrontmatter } from "./workflowParser";
+import { parseWorkflowDefinition, preservedFrontmatterFromSource, workflowToFrontmatter } from "./workflowParser";
 import type { WorkflowSourceFormat } from "./types";
 
 export interface WorkflowMigrationCandidate {
@@ -64,10 +64,7 @@ export class WorkflowMigrationService {
 			}
 
 			const allowedFrontmatterKeys = this.getAllowedFrontmatterKeys();
-			const parsedSource = parseMarkdownFrontmatter(loaded.source);
-			const preserved = parsedSource.error
-				? {}
-				: pickAllowedFrontmatter(parsedSource.data, allowedFrontmatterKeys);
+			const preserved = preservedFrontmatterFromSource(loaded.source, allowedFrontmatterKeys);
 			const target = replaceMarkdownFrontmatter(loaded.source, workflowToFrontmatter(loaded.workflow, preserved));
 			const parsedTarget = parseMarkdownFrontmatter(target);
 			const verified = parsedTarget.error

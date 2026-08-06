@@ -1,7 +1,7 @@
 import { normalizePath, TFile, type App } from "obsidian";
 import { parseMarkdownFrontmatter, replaceMarkdownFrontmatter } from "./frontmatter";
 import { isMarkdownFile, isWorkflowPath, safePathSegment } from "./path";
-import { parseWorkflowDefinition, pickAllowedFrontmatter, workflowToFrontmatter } from "./workflowParser";
+import { parseWorkflowDefinition, preservedFrontmatterFromSource, workflowToFrontmatter } from "./workflowParser";
 import type {
 	LoadedWorkflow,
 	TaskNotesWorkflowsSettings,
@@ -66,16 +66,13 @@ export class WorkflowRepository {
 		const source = await this.app.vault.read(file);
 		const updated = replaceMarkdownFrontmatter(
 			source,
-			workflowToFrontmatter(workflow, this.preservedFrontmatter(source))
+			workflowToFrontmatter(
+				workflow,
+				preservedFrontmatterFromSource(source, this.getSettings().allowedFrontmatterKeys)
+			)
 		);
 		await this.app.vault.modify(file, updated);
 		await this.reload();
-	}
-
-	private preservedFrontmatter(source: string): Record<string, unknown> {
-		const parsed = parseMarkdownFrontmatter(source);
-		if (parsed.error) return {};
-		return pickAllowedFrontmatter(parsed.data, this.getSettings().allowedFrontmatterKeys);
 	}
 
 	async createWorkflow(workflow: WorkflowDefinition, body: string): Promise<LoadedWorkflow> {
