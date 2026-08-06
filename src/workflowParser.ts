@@ -77,11 +77,10 @@ export function parseWorkflowDefinition(
 	sourceFormat: WorkflowSourceFormat;
 } {
 	const diagnostics: WorkflowDiagnostic[] = [];
-	const sourceFormat = detectWorkflowSourceFormat(input);
 	if (!isRecord(input)) {
 		return {
 			workflow: null,
-			sourceFormat,
+			sourceFormat: detectWorkflowSourceFormat(input),
 			diagnostics: [
 				{
 					severity: "error",
@@ -91,7 +90,12 @@ export function parseWorkflowDefinition(
 			],
 		};
 	}
+	// Strip allowlisted keys BEFORE format detection so detection and
+	// validation see the same cleaned record. (Reserved keys can never be
+	// allowlisted, so the detection markers type/version/schemaVersion are
+	// also safe by vocabulary — the ordering makes it hold by construction.)
 	const data = partitionAllowedFrontmatter(input, options.allowedFrontmatterKeys ?? []).workflow;
+	const sourceFormat = detectWorkflowSourceFormat(data);
 
 	if (sourceFormat === "runtime-v0.2") {
 		diagnostics.push(...validateRuntimeWorkflowRecord(data));
