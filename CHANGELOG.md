@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.5] - 2026-08-06
+
+### Added
+
+- Added an "Extra frontmatter properties" setting: an allowlist of frontmatter property names (one per line, default empty) that workflow validation silently accepts in both the legacy and runtime-v0.2 parse paths and that every workflow rewrite (editor save, explicit migration) preserves verbatim. This lets vault-convention frontmatter such as `uid` or `created` coexist with workflow frontmatter.
+
 ## Unreleased
 
 ### Fixed
