@@ -192,10 +192,19 @@ export function workflowToFrontmatter(
 	preservedFrontmatter?: Record<string, unknown>
 ): string {
 	const record: Record<string, unknown> = workflowToRuntimeRecord(workflow);
+	// Collisions are structurally impossible when `preservedFrontmatter` comes
+	// from pickAllowedFrontmatter: the runtime record only emits reserved keys
+	// (schema fields plus `x-` extensions), and reserved keys are never routed
+	// to the preserved half. The own-property filter below is defense in depth
+	// for callers that assemble `preservedFrontmatter` by hand — the workflow
+	// record always wins.
+	const recordKeys = new Set(Object.keys(record));
 	const preserved = Object.fromEntries(
-		Object.entries(preservedFrontmatter ?? {}).filter(([key]) => !(key in record))
+		Object.entries(preservedFrontmatter ?? {}).filter(([key]) => !recordKeys.has(key))
 	);
-	return stringify({ ...preserved, ...record }, {
+	// Workflow record keys first, so `type:` stays the leading frontmatter
+	// line scanners expect; preserved vault keys follow.
+	return stringify({ ...record, ...preserved }, {
 		lineWidth: 100,
 		sortMapEntries: false,
 	});

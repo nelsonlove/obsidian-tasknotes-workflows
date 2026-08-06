@@ -423,6 +423,14 @@ describe("frontmatter allowlist", () => {
 		expect(record.uid).toBe("20260806-abc");
 		expect(record.created).toBe("2026-08-06T00:00:00Z");
 		expect(record.name).toBe("Auto start");
+
+		// Workflow record keys come first (type stays the leading line);
+		// preserved vault keys follow the record.
+		const keys = Object.keys(record);
+		expect(keys[0]).toBe("type");
+		expect(keys.indexOf("uid")).toBeGreaterThan(keys.indexOf("run"));
+		expect(keys.indexOf("created")).toBeGreaterThan(keys.indexOf("run"));
+		expect(frontmatter.startsWith("type:")).toBe(true);
 	});
 
 	it("round-trips allowlisted keys through parse, serialize, and re-parse", () => {
