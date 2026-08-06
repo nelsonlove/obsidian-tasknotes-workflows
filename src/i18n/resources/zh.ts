@@ -86,6 +86,10 @@ export const zh: TranslationTree = {
 				name: "维持默认值",
 				description: "创建缺失的工作流程注释和工作流程基础，而无需覆盖现有文件。",
 			},
+			allowedFrontmatterKeys: {
+				name: "额外的前置属性",
+				description: "工作流验证静默允许并在保存时保留的前置属性名称（每行一个）。用于在工作流笔记中保留 uid 或 created 等仓库约定属性。",
+			},
 		},
 		triggers: {
 			heading: "触发器",

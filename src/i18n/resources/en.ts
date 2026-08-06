@@ -86,6 +86,10 @@ export const en: TranslationTree = {
 				name: "Maintain defaults",
 				description: "Create missing workflow notes and the workflow base without overwriting existing files.",
 			},
+			allowedFrontmatterKeys: {
+				name: "Extra frontmatter properties",
+				description: "Frontmatter property names, one per line, that workflow validation silently allows and workflow saves preserve. Use this to keep vault-convention properties such as uid or created on workflow notes.",
+			},
 		},
 		triggers: {
 			heading: "Triggers",

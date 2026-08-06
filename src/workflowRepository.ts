@@ -1,7 +1,7 @@
 import { normalizePath, TFile, type App } from "obsidian";
 import { parseMarkdownFrontmatter, replaceMarkdownFrontmatter } from "./frontmatter";
 import { isMarkdownFile, isWorkflowPath, safePathSegment } from "./path";
-import { parseWorkflowDefinition, workflowToFrontmatter } from "./workflowParser";
+import { parseWorkflowDefinition, pickAllowedFrontmatter, workflowToFrontmatter } from "./workflowParser";
 import type {
 	LoadedWorkflow,
 	TaskNotesWorkflowsSettings,
@@ -48,7 +48,9 @@ export class WorkflowRepository {
 			: [];
 		const { workflow, diagnostics, sourceFormat } = parsed.error
 			? { workflow: null, diagnostics: [], sourceFormat: "unknown" as const }
-			: parseWorkflowDefinition(parsed.data, source);
+			: parseWorkflowDefinition(parsed.data, source, {
+					allowedFrontmatterKeys: this.getSettings().allowedFrontmatterKeys,
+				});
 
 		return {
 			file,
@@ -62,9 +64,18 @@ export class WorkflowRepository {
 
 	async saveWorkflow(file: TFile, workflow: WorkflowDefinition): Promise<void> {
 		const source = await this.app.vault.read(file);
-		const updated = replaceMarkdownFrontmatter(source, workflowToFrontmatter(workflow));
+		const updated = replaceMarkdownFrontmatter(
+			source,
+			workflowToFrontmatter(workflow, this.preservedFrontmatter(source))
+		);
 		await this.app.vault.modify(file, updated);
 		await this.reload();
+	}
+
+	private preservedFrontmatter(source: string): Record<string, unknown> {
+		const parsed = parseMarkdownFrontmatter(source);
+		if (parsed.error) return {};
+		return pickAllowedFrontmatter(parsed.data, this.getSettings().allowedFrontmatterKeys);
 	}
 
 	async createWorkflow(workflow: WorkflowDefinition, body: string): Promise<LoadedWorkflow> {

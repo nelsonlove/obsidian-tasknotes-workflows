@@ -86,6 +86,10 @@ export const es: TranslationTree = {
 				name: "Mantener valores predeterminados",
 				description: "Cree notas de flujo de trabajo faltantes y la base del flujo de trabajo sin sobrescribir archivos existentes.",
 			},
+			allowedFrontmatterKeys: {
+				name: "Propiedades adicionales del frontmatter",
+				description: "Nombres de propiedades del frontmatter, uno por línea, que la validación de flujos de trabajo permite silenciosamente y que se conservan al guardar. Úselo para mantener propiedades de convención del vault como uid o created en las notas de flujo de trabajo.",
+			},
 		},
 		triggers: {
 			heading: "Desencadenantes",

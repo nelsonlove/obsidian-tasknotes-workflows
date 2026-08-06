@@ -86,6 +86,10 @@ export const pt: TranslationTree = {
 				name: "Manter padrões",
 				description: "Crie notas de fluxo de trabalho ausentes e a base do fluxo de trabalho sem substituir os arquivos existentes.",
 			},
+			allowedFrontmatterKeys: {
+				name: "Propriedades adicionais de frontmatter",
+				description: "Nomes de propriedades de frontmatter, um por linha, que a validação de fluxos de trabalho permite silenciosamente e que são preservados ao salvar. Use isto para manter propriedades de convenção do cofre, como uid ou created, nas notas de fluxo de trabalho.",
+			},
 		},
 		triggers: {
 			heading: "Gatilhos",

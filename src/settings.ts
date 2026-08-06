@@ -16,6 +16,7 @@ export const DEFAULT_SETTINGS: TaskNotesWorkflowsSettings = {
 	minIntervalMs: 60_000,
 	uiLanguage: "system",
 	enableCodeSteps: false,
+	allowedFrontmatterKeys: [],
 };
 
 export function normalizeSettings(input: Partial<TaskNotesWorkflowsSettings>): TaskNotesWorkflowsSettings {
@@ -29,5 +30,17 @@ export function normalizeSettings(input: Partial<TaskNotesWorkflowsSettings>): T
 		maxHistoryEntries: Math.max(50, input.maxHistoryEntries ?? DEFAULT_SETTINGS.maxHistoryEntries),
 		minIntervalMs: Math.max(30_000, input.minIntervalMs ?? DEFAULT_SETTINGS.minIntervalMs),
 		uiLanguage: input.uiLanguage?.trim() || DEFAULT_SETTINGS.uiLanguage,
+		allowedFrontmatterKeys: normalizeAllowedFrontmatterKeys(input.allowedFrontmatterKeys),
 	};
+}
+
+export function normalizeAllowedFrontmatterKeys(input: unknown): string[] {
+	if (!Array.isArray(input)) return [...DEFAULT_SETTINGS.allowedFrontmatterKeys];
+	const keys: string[] = [];
+	for (const value of input) {
+		if (typeof value !== "string") continue;
+		const key = value.trim();
+		if (key.length > 0 && !keys.includes(key)) keys.push(key);
+	}
+	return keys;
 }

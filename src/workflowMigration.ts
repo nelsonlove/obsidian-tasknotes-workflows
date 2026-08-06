@@ -1,7 +1,7 @@
 import { normalizePath, TFile, type App } from "obsidian";
 import { parseMarkdownFrontmatter, replaceMarkdownFrontmatter } from "./frontmatter";
 import type { WorkflowRepository } from "./workflowRepository";
-import { parseWorkflowDefinition, workflowToFrontmatter } from "./workflowParser";
+import { parseWorkflowDefinition, pickAllowedFrontmatter, workflowToFrontmatter } from "./workflowParser";
 import type { WorkflowSourceFormat } from "./types";
 
 export interface WorkflowMigrationCandidate {
@@ -36,7 +36,8 @@ export interface WorkflowMigrationApplyResult {
 export class WorkflowMigrationService {
 	constructor(
 		private readonly app: App,
-		private readonly repository: WorkflowRepository
+		private readonly repository: WorkflowRepository,
+		private readonly getAllowedFrontmatterKeys: () => readonly string[] = () => []
 	) {}
 
 	async analyze(): Promise<WorkflowMigrationReport> {
@@ -62,11 +63,16 @@ export class WorkflowMigrationService {
 				continue;
 			}
 
-			const target = replaceMarkdownFrontmatter(loaded.source, workflowToFrontmatter(loaded.workflow));
+			const allowedFrontmatterKeys = this.getAllowedFrontmatterKeys();
+			const parsedSource = parseMarkdownFrontmatter(loaded.source);
+			const preserved = parsedSource.error
+				? {}
+				: pickAllowedFrontmatter(parsedSource.data, allowedFrontmatterKeys);
+			const target = replaceMarkdownFrontmatter(loaded.source, workflowToFrontmatter(loaded.workflow, preserved));
 			const parsedTarget = parseMarkdownFrontmatter(target);
 			const verified = parsedTarget.error
 				? null
-				: parseWorkflowDefinition(parsedTarget.data, target);
+				: parseWorkflowDefinition(parsedTarget.data, target, { allowedFrontmatterKeys });
 			if (!verified?.workflow || verified.sourceFormat !== "runtime-v0.2") {
 				invalid.push({
 					path: loaded.file.path,

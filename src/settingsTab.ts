@@ -1,5 +1,6 @@
 import { Notice, PluginSettingTab, Setting, type App, type TextComponent } from "obsidian";
 import { DEFAULT_WORKFLOW_FOLDER, DEFAULT_WORKFLOW_VIEW_PATH } from "./constants";
+import { normalizeAllowedFrontmatterKeys } from "./settings";
 import type TaskNotesWorkflowsPlugin from "../main";
 
 export class WorkflowsSettingsTab extends PluginSettingTab {
@@ -62,6 +63,20 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 					void this.workflowsPlugin.saveSettings();
 				})
 			);
+
+		new Setting(containerEl)
+			.setName(this.workflowsPlugin.t("settings.workflowFiles.allowedFrontmatterKeys.name"))
+			.setDesc(this.workflowsPlugin.t("settings.workflowFiles.allowedFrontmatterKeys.description"))
+			.addTextArea((text) => {
+				text.setValue(this.workflowsPlugin.settings.allowedFrontmatterKeys.join("\n"));
+				text.inputEl.rows = 4;
+				text.inputEl.addEventListener("blur", () => {
+					const next = normalizeAllowedFrontmatterKeys(text.getValue().split(/\r?\n/u));
+					if (next.join("\n") === this.workflowsPlugin.settings.allowedFrontmatterKeys.join("\n")) return;
+					this.workflowsPlugin.settings.allowedFrontmatterKeys = next;
+					void this.workflowsPlugin.saveSettingsAndReload();
+				});
+			});
 
 		new Setting(containerEl)
 			.setName("Allow code steps")

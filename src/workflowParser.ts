@@ -45,17 +45,27 @@ const TOP_LEVEL_FIELDS = new Set([
 	"extensions",
 ]);
 
+export interface WorkflowParseOptions {
+	/**
+	 * Frontmatter property names the plugin silently allows and preserves.
+	 * Allowlisted keys are treated as opaque passthrough: they produce no
+	 * diagnostics and never become part of the workflow definition.
+	 */
+	allowedFrontmatterKeys?: readonly string[];
+}
+
 export function parseWorkflowDefinition(
-	data: unknown,
-	_source: string
+	input: unknown,
+	_source: string,
+	options: WorkflowParseOptions = {}
 ): {
 	workflow: WorkflowDefinition | null;
 	diagnostics: WorkflowDiagnostic[];
 	sourceFormat: WorkflowSourceFormat;
 } {
 	const diagnostics: WorkflowDiagnostic[] = [];
-	const sourceFormat = detectWorkflowSourceFormat(data);
-	if (!isRecord(data)) {
+	const sourceFormat = detectWorkflowSourceFormat(input);
+	if (!isRecord(input)) {
 		return {
 			workflow: null,
 			sourceFormat,
@@ -68,6 +78,7 @@ export function parseWorkflowDefinition(
 			],
 		};
 	}
+	const data = withoutAllowedFrontmatter(input, options.allowedFrontmatterKeys ?? []);
 
 	if (sourceFormat === "runtime-v0.2") {
 		diagnostics.push(...validateRuntimeWorkflowRecord(data));
@@ -159,11 +170,41 @@ export function parseWorkflowDefinition(
 	return { workflow, diagnostics, sourceFormat };
 }
 
-export function workflowToFrontmatter(workflow: WorkflowDefinition): string {
-	return stringify(workflowToRuntimeRecord(workflow), {
+export function workflowToFrontmatter(
+	workflow: WorkflowDefinition,
+	preservedFrontmatter?: Record<string, unknown>
+): string {
+	const record: Record<string, unknown> = workflowToRuntimeRecord(workflow);
+	const preserved = Object.fromEntries(
+		Object.entries(preservedFrontmatter ?? {}).filter(([key]) => !(key in record))
+	);
+	return stringify({ ...preserved, ...record }, {
 		lineWidth: 100,
 		sortMapEntries: false,
 	});
+}
+
+/**
+ * Picks the allowlisted frontmatter properties present in parsed frontmatter,
+ * so a write path can pass them to {@link workflowToFrontmatter} for verbatim
+ * preservation. Keys owned by the workflow record itself always win collisions.
+ */
+export function pickAllowedFrontmatter(
+	data: unknown,
+	allowedFrontmatterKeys: readonly string[]
+): Record<string, unknown> {
+	if (!isRecord(data) || allowedFrontmatterKeys.length === 0) return {};
+	const allowed = new Set(allowedFrontmatterKeys);
+	return Object.fromEntries(Object.entries(data).filter(([key]) => allowed.has(key)));
+}
+
+function withoutAllowedFrontmatter(
+	data: Record<string, unknown>,
+	allowedFrontmatterKeys: readonly string[]
+): Record<string, unknown> {
+	if (allowedFrontmatterKeys.length === 0) return data;
+	const allowed = new Set(allowedFrontmatterKeys);
+	return Object.fromEntries(Object.entries(data).filter(([key]) => !allowed.has(key)));
 }
 
 export function loadedWorkflowStatus(workflow: LoadedWorkflow): "enabled" | "disabled" | "invalid" {
