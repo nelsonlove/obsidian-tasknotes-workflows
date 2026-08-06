@@ -163,3 +163,32 @@ describe("workflow migration", () => {
 		expect(vault.files.get("TaskNotes/Workflows/zzz-legacy-two.md")?.content).toBe(second);
 	});
 });
+
+describe("workflow migration frontmatter allowlist", () => {
+	it("preserves allowlisted vault frontmatter through migration", async () => {
+		const vault = new MemoryVault();
+		vault.add(
+			"TaskNotes/Workflows/legacy.md",
+			LEGACY.replace("customSetting: keep-me", "customSetting: keep-me\nuid: 20260806-abc")
+		);
+		const app = { vault } as never;
+		const settings = { ...DEFAULT_SETTINGS, allowedFrontmatterKeys: ["uid"] };
+		const repository = new WorkflowRepository(app, () => settings);
+		const service = new WorkflowMigrationService(app, repository, () => settings.allowedFrontmatterKeys);
+
+		const report = await service.analyze();
+		expect(report.invalid).toEqual([]);
+		expect(report.candidates).toHaveLength(1);
+
+		await service.apply(report);
+		const migrated = vault.files.get("TaskNotes/Workflows/legacy.md")?.content ?? "";
+		const parsed = parseMarkdownFrontmatter(migrated);
+		const data = parsed.data as Record<string, unknown>;
+		expect(data.uid).toBe("20260806-abc");
+		// uid stays a top-level passthrough key, not x-tasknotes-legacy baggage.
+		expect(JSON.stringify(data["x-tasknotes-legacy"] ?? {})).not.toContain("uid");
+		// The record minus the allowlisted key is still a valid runtime workflow.
+		const runtimeRecord = Object.fromEntries(Object.entries(data).filter(([key]) => key !== "uid"));
+		expect(validateRuntimeRecord(runtimeRecord).valid).toBe(true);
+	});
+});

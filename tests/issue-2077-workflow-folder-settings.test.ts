@@ -19,6 +19,7 @@ class MockContainer {
 
 class MockInputElement {
 	value = "";
+	rows = 0;
 	private readonly listeners = new Map<string, Array<(event: MockEvent) => void>>();
 
 	addEventListener(name: string, callback: (event: MockEvent) => void): void {
@@ -142,6 +143,11 @@ describe("issue #2077 - workflow folder setting input", () => {
 					const text = new MockTextComponent();
 					textComponents.push(text);
 					callback(text);
+					return this;
+				}
+
+				addTextArea(callback: (text: MockTextComponent) => void): this {
+					callback(new MockTextComponent());
 					return this;
 				}
 
