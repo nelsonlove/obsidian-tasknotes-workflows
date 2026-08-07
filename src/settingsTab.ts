@@ -1,8 +1,12 @@
-import { Notice, PluginSettingTab, Setting, type App, type TextComponent } from "obsidian";
+import { Notice, PluginSettingTab, Setting, type App, type TextAreaComponent, type TextComponent } from "obsidian";
 import { DEFAULT_WORKFLOW_FOLDER, DEFAULT_WORKFLOW_VIEW_PATH } from "./constants";
+import { normalizeAllowedFrontmatterKeys } from "./settings";
+import { isReservedFrontmatterKey } from "./workflowParser";
 import type TaskNotesWorkflowsPlugin from "../main";
 
 export class WorkflowsSettingsTab extends PluginSettingTab {
+	private allowedKeysWarningEl: HTMLElement | null = null;
+
 	constructor(app: App, private readonly workflowsPlugin: TaskNotesWorkflowsPlugin) {
 		super(app, workflowsPlugin);
 		this.workflowsPlugin.registerEvent(
@@ -62,6 +66,19 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 					void this.workflowsPlugin.saveSettings();
 				})
 			);
+
+		new Setting(containerEl)
+			.setName(this.workflowsPlugin.t("settings.workflowFiles.allowedFrontmatterKeys.name"))
+			.setDesc(this.workflowsPlugin.t("settings.workflowFiles.allowedFrontmatterKeys.description"))
+			.addTextArea((text) => {
+				text.setValue(this.workflowsPlugin.settings.allowedFrontmatterKeys.join("\n"));
+				text.inputEl.rows = 4;
+				this.commitTextAreaOnChange(text, (value) => {
+					this.updateAllowedFrontmatterKeys(value);
+				});
+			});
+		this.allowedKeysWarningEl = containerEl.createDiv({ cls: "tnw-settings-reserved-keys-warning" });
+		this.allowedKeysWarningEl.toggle(false);
 
 		new Setting(containerEl)
 			.setName("Allow code steps")
@@ -199,6 +216,48 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 					void this.workflowsPlugin.saveSettings();
 				});
 			});
+	}
+
+	private updateAllowedFrontmatterKeys(value: string): void {
+		const entered = value
+			.split(/\r?\n/u)
+			.map((entry) => entry.trim())
+			.filter((entry) => entry.length > 0);
+		const ignored = [...new Set(entered.filter((entry) => isReservedFrontmatterKey(entry)))];
+		this.renderAllowedKeysWarning(ignored);
+		const next = normalizeAllowedFrontmatterKeys(entered);
+		if (next.join("\n") === this.workflowsPlugin.settings.allowedFrontmatterKeys.join("\n")) return;
+		this.workflowsPlugin.settings.allowedFrontmatterKeys = next;
+		void this.workflowsPlugin.saveSettingsAndReload();
+	}
+
+	private renderAllowedKeysWarning(ignored: string[]): void {
+		const warningEl = this.allowedKeysWarningEl;
+		if (!warningEl) return;
+		warningEl.setText(
+			ignored.length > 0
+				? this.workflowsPlugin.t("settings.workflowFiles.allowedFrontmatterKeys.reservedIgnored", {
+						keys: ignored.join(", "),
+					})
+				: ""
+		);
+		warningEl.toggle(ignored.length > 0);
+	}
+
+	private commitTextAreaOnChange(text: TextAreaComponent, onCommit: (value: string) => void): void {
+		let timer: number | null = null;
+		const commit = () => {
+			if (timer !== null) {
+				window.clearTimeout(timer);
+				timer = null;
+			}
+			onCommit(text.getValue());
+		};
+		text.onChange(() => {
+			if (timer !== null) window.clearTimeout(timer);
+			timer = window.setTimeout(commit, 500);
+		});
+		text.inputEl.addEventListener("blur", commit);
 	}
 
 	private updateWorkflowFolder(value: string): void {

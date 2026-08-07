@@ -86,6 +86,11 @@ export const de: TranslationTree = {
 				name: "Behalten Sie die Standardeinstellungen bei",
 				description: "Erstellen Sie fehlende Workflow-Notizen und die Workflow-Basis, ohne vorhandene Dateien zu überschreiben.",
 			},
+			allowedFrontmatterKeys: {
+				name: "Zusätzliche Frontmatter-Eigenschaften",
+				description: "Frontmatter-Eigenschaftsnamen, einer pro Zeile, die die Workflow-Validierung stillschweigend zulässt und die beim Speichern von Workflows erhalten bleiben. Verwenden Sie dies, um Vault-Konventionseigenschaften wie uid oder created in Workflow-Notizen zu behalten.",
+				reservedIgnored: "Reservierte Workflow-Eigenschaften wurden ignoriert: {keys}",
+			},
 		},
 		triggers: {
 			heading: "Auslöser",

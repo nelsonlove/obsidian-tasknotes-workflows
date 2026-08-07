@@ -86,6 +86,11 @@ export const fr: TranslationTree = {
 				name: "Conserver les valeurs par défaut",
 				description: "Créez des notes de flux de travail manquantes et la base de flux de travail sans écraser les fichiers existants.",
 			},
+			allowedFrontmatterKeys: {
+				name: "Propriétés de frontmatter supplémentaires",
+				description: "Noms de propriétés de frontmatter, un par ligne, que la validation des flux de travail autorise silencieusement et que les enregistrements préservent. Utilisez ceci pour conserver des propriétés de convention du coffre comme uid ou created sur les notes de flux de travail.",
+				reservedIgnored: "Propriétés réservées du flux de travail ignorées : {keys}",
+			},
 		},
 		triggers: {
 			heading: "Déclencheurs",

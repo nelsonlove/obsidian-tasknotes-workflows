@@ -86,6 +86,11 @@ export const ja: TranslationTree = {
 				name: "デフォルトを維持する",
 				description: "既存のファイルを上書きせずに、不足しているワークフロー ノートとワークフロー ベースを作成します。",
 			},
+			allowedFrontmatterKeys: {
+				name: "追加のフロントマター プロパティ",
+				description: "ワークフローの検証で警告なしに許可され、保存時に保持されるフロントマターのプロパティ名（1 行に 1 つ）。uid や created などの保管庫規約プロパティをワークフロー ノートに残すために使用します。",
+				reservedIgnored: "予約済みのワークフロー プロパティを無視しました: {keys}",
+			},
 		},
 		triggers: {
 			heading: "トリガー",

@@ -163,3 +163,64 @@ describe("workflow migration", () => {
 		expect(vault.files.get("TaskNotes/Workflows/zzz-legacy-two.md")?.content).toBe(second);
 	});
 });
+
+describe("workflow migration frontmatter allowlist", () => {
+	it("preserves allowlisted vault frontmatter through migration", async () => {
+		const vault = new MemoryVault();
+		vault.add(
+			"TaskNotes/Workflows/legacy.md",
+			LEGACY.replace("customSetting: keep-me", "customSetting: keep-me\nuid: 20260806-abc")
+		);
+		const app = { vault } as never;
+		const settings = { ...DEFAULT_SETTINGS, allowedFrontmatterKeys: ["uid"] };
+		const repository = new WorkflowRepository(app, () => settings);
+		const service = new WorkflowMigrationService(app, repository, () => settings.allowedFrontmatterKeys);
+
+		const report = await service.analyze();
+		expect(report.invalid).toEqual([]);
+		expect(report.candidates).toHaveLength(1);
+
+		await service.apply(report);
+		const migrated = vault.files.get("TaskNotes/Workflows/legacy.md")?.content ?? "";
+		const parsed = parseMarkdownFrontmatter(migrated);
+		const data = parsed.data as Record<string, unknown>;
+		expect(data.uid).toBe("20260806-abc");
+		// uid stays a top-level passthrough key, not x-tasknotes-legacy baggage.
+		expect(JSON.stringify(data["x-tasknotes-legacy"] ?? {})).not.toContain("uid");
+		// The record minus the allowlisted key is still a valid runtime workflow.
+		const runtimeRecord = Object.fromEntries(Object.entries(data).filter(([key]) => key !== "uid"));
+		expect(validateRuntimeRecord(runtimeRecord).valid).toBe(true);
+	});
+
+
+	it("re-verifies as runtime-v0.2 even when a raw allowlist names detection markers", async () => {
+		// Regression: a preserved schemaVersion in the migration target used to
+		// flip detectWorkflowSourceFormat away from runtime-v0.2 and fail the
+		// verify step. Reserved keys are now inert in any allowlist, so a raw,
+		// un-normalized allowlist naming them cannot poison detection.
+		const vault = new MemoryVault();
+		vault.add(
+			"TaskNotes/Workflows/legacy.md",
+			LEGACY.replace("customSetting: keep-me", "customSetting: keep-me\nuid: 20260806-abc")
+		);
+		const app = { vault } as never;
+		const rawAllowlist = ["uid", "schemaVersion", "type", "version"];
+		const settings = { ...DEFAULT_SETTINGS, allowedFrontmatterKeys: rawAllowlist };
+		const repository = new WorkflowRepository(app, () => settings);
+		const service = new WorkflowMigrationService(app, repository, () => rawAllowlist);
+
+		const report = await service.analyze();
+		expect(report.invalid).toEqual([]);
+		expect(report.candidates).toHaveLength(1);
+
+		await service.apply(report);
+		const migrated = vault.files.get("TaskNotes/Workflows/legacy.md")?.content ?? "";
+		const data = parseMarkdownFrontmatter(migrated).data as Record<string, unknown>;
+		expect(data.uid).toBe("20260806-abc");
+		expect(data.type).toBe("runtime_workflow");
+		expect(data.schemaVersion).toBeUndefined();
+		expect(validateRuntimeRecord(
+			Object.fromEntries(Object.entries(data).filter(([key]) => key !== "uid"))
+		).valid).toBe(true);
+	});
+});

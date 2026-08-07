@@ -128,7 +128,11 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 			(workflow, options) => this.executeWorkflow(workflow, options)
 		);
 		this.defaults = new DefaultWorkflowsService(this.app, () => this.settings);
-		this.workflowMigrations = new WorkflowMigrationService(this.app, this.repository);
+		this.workflowMigrations = new WorkflowMigrationService(
+			this.app,
+			this.repository,
+			() => this.settings.allowedFrontmatterKeys
+		);
 
 		this.addSettingTab(new WorkflowsSettingsTab(this.app, this));
 		this.registerWorkflowBasesView();

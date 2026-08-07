@@ -86,6 +86,11 @@ export const ko: TranslationTree = {
 				name: "기본값 유지",
 				description: "기존 파일을 덮어쓰지 않고 누락된 워크플로 메모와 워크플로 기반을 만듭니다.",
 			},
+			allowedFrontmatterKeys: {
+				name: "추가 프런트매터 속성",
+				description: "워크플로 검증에서 조용히 허용되고 저장 시 보존되는 프런트매터 속성 이름(한 줄에 하나씩)입니다. uid나 created 같은 보관함 규칙 속성을 워크플로 노트에 유지하는 데 사용하세요.",
+				reservedIgnored: "예약된 워크플로 속성을 무시했습니다: {keys}",
+			},
 		},
 		triggers: {
 			heading: "트리거",

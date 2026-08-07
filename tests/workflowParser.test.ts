@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { validateRuntimeRecord } from "@callumalpass/mdbase-runtime";
 import { parse } from "yaml";
 import { parseMarkdownFrontmatter } from "../src/frontmatter";
-import { parseWorkflowDefinition, workflowToFrontmatter } from "../src/workflowParser";
+import { parseWorkflowDefinition, pickAllowedFrontmatter, workflowToFrontmatter } from "../src/workflowParser";
 
 describe("workflow parser", () => {
 	it("parses a valid workflow definition", () => {
@@ -337,5 +337,152 @@ run:
 		expect(result.workflow?.steps[0]?.input).toEqual({ message: "{{event.after.path}}" });
 		expect(result.workflow?.run.concurrency.policy).toBe("allow");
 		expect(result.workflow?.run.limits.maxItems).toBe(10);
+	});
+});
+
+describe("frontmatter allowlist", () => {
+	function legacyData(extra: Record<string, unknown> = {}): Record<string, unknown> {
+		return {
+			type: "workflow",
+			schemaVersion: 1,
+			id: "auto-start",
+			name: "Auto start",
+			enabled: true,
+			triggers: [{ id: "manual-run", type: "manual" }],
+			steps: [{ id: "notify", type: "notice.show", input: { message: "hi" } }],
+			run: {
+				mode: "sequential",
+				concurrency: { group: "workflow", policy: "skip" },
+				limits: { maxItems: 1 },
+				onError: "stop",
+				source: "tasknotes-workflows",
+			},
+			...extra,
+		};
+	}
+
+	function runtimeData(extra: Record<string, unknown> = {}): Record<string, unknown> {
+		const parsed = parseWorkflowDefinition(legacyData(), "");
+		const record = parse(workflowToFrontmatter(parsed.workflow!)) as Record<string, unknown>;
+		return { ...record, ...extra };
+	}
+
+	it("warns on unknown legacy top-level fields unless allowlisted", () => {
+		const withoutAllowlist = parseWorkflowDefinition(legacyData({ uid: "20260806" }), "");
+		expect(withoutAllowlist.diagnostics).toEqual([
+			{ severity: "warning", path: "uid", message: 'Unknown top-level field "uid".' },
+		]);
+
+		const withAllowlist = parseWorkflowDefinition(legacyData({ uid: "20260806" }), "", {
+			allowedFrontmatterKeys: ["uid"],
+		});
+		expect(withAllowlist.diagnostics).toEqual([]);
+		expect(withAllowlist.workflow).not.toBeNull();
+		expect(withAllowlist.workflow?.extensions).toBeUndefined();
+	});
+
+	it("still warns for legacy fields outside the allowlist", () => {
+		const result = parseWorkflowDefinition(legacyData({ uid: "20260806", custom: "value" }), "", {
+			allowedFrontmatterKeys: ["uid"],
+		});
+		expect(result.diagnostics).toEqual([
+			{ severity: "warning", path: "custom", message: 'Unknown top-level field "custom".' },
+		]);
+	});
+
+	it("accepts allowlisted keys on runtime records that would otherwise fail schema validation", () => {
+		const record = runtimeData({ uid: "20260806", created: "2026-08-06" });
+
+		const withoutAllowlist = parseWorkflowDefinition(record, "");
+		expect(withoutAllowlist.workflow).toBeNull();
+		expect(withoutAllowlist.diagnostics.some((diagnostic) => diagnostic.severity === "error")).toBe(true);
+
+		const withAllowlist = parseWorkflowDefinition(record, "", {
+			allowedFrontmatterKeys: ["uid", "created"],
+		});
+		expect(withAllowlist.diagnostics).toEqual([]);
+		expect(withAllowlist.sourceFormat).toBe("runtime-v0.2");
+		expect(withAllowlist.workflow?.id).toBe("auto-start");
+	});
+
+	it("still rejects runtime records with unknown keys outside the allowlist", () => {
+		const record = runtimeData({ uid: "20260806", custom: "value" });
+		const result = parseWorkflowDefinition(record, "", { allowedFrontmatterKeys: ["uid"] });
+		expect(result.workflow).toBeNull();
+		expect(result.diagnostics.some((diagnostic) => diagnostic.severity === "error")).toBe(true);
+	});
+
+	it("serializes preserved frontmatter verbatim without letting it shadow workflow fields", () => {
+		const parsed = parseWorkflowDefinition(legacyData(), "");
+		const frontmatter = workflowToFrontmatter(parsed.workflow!, {
+			uid: "20260806-abc",
+			created: "2026-08-06T00:00:00Z",
+			name: "should not win",
+		});
+		const record = parse(frontmatter) as Record<string, unknown>;
+		expect(record.uid).toBe("20260806-abc");
+		expect(record.created).toBe("2026-08-06T00:00:00Z");
+		expect(record.name).toBe("Auto start");
+
+		// Workflow record keys come first (type stays the leading line);
+		// preserved vault keys follow the record.
+		const keys = Object.keys(record);
+		expect(keys[0]).toBe("type");
+		expect(keys.indexOf("uid")).toBeGreaterThan(keys.indexOf("run"));
+		expect(keys.indexOf("created")).toBeGreaterThan(keys.indexOf("run"));
+		expect(frontmatter.startsWith("type:")).toBe(true);
+	});
+
+	it("round-trips allowlisted keys through parse, serialize, and re-parse", () => {
+		const allowedFrontmatterKeys = ["uid", "created"];
+		const original = runtimeData({ uid: "20260806-abc", created: "2026-08-06" });
+
+		const parsed = parseWorkflowDefinition(original, "", { allowedFrontmatterKeys });
+		expect(parsed.diagnostics).toEqual([]);
+
+		const preserved = pickAllowedFrontmatter(original, allowedFrontmatterKeys);
+		expect(preserved).toEqual({ uid: "20260806-abc", created: "2026-08-06" });
+
+		const frontmatter = workflowToFrontmatter(parsed.workflow!, preserved);
+		const reparsedRecord = parse(frontmatter) as Record<string, unknown>;
+		expect(reparsedRecord.uid).toBe("20260806-abc");
+		expect(reparsedRecord.created).toBe("2026-08-06");
+
+		const reparsed = parseWorkflowDefinition(reparsedRecord, frontmatter, { allowedFrontmatterKeys });
+		expect(reparsed.diagnostics).toEqual([]);
+		expect(reparsed.workflow?.id).toBe("auto-start");
+	});
+
+	it("treats reserved workflow-owned keys in the allowlist as inert", () => {
+		// Even a raw, un-normalized allowlist cannot strip schema keys: the
+		// legacy record keeps schemaVersion/type and parses as tasknotes-v1.
+		const result = parseWorkflowDefinition(legacyData(), "", {
+			allowedFrontmatterKeys: ["type", "schemaVersion", "version", "name", "uid"],
+		});
+		expect(result.diagnostics).toEqual([]);
+		expect(result.sourceFormat).toBe("tasknotes-v1");
+		expect(result.workflow?.name).toBe("Auto start");
+
+		// And a runtime record keeps type/version, so it still validates.
+		const runtime = parseWorkflowDefinition(runtimeData(), "", {
+			allowedFrontmatterKeys: ["type", "version"],
+		});
+		expect(runtime.diagnostics).toEqual([]);
+		expect(runtime.sourceFormat).toBe("runtime-v0.2");
+	});
+
+	it("never picks reserved keys for preservation", () => {
+		expect(
+			pickAllowedFrontmatter(
+				{ type: "runtime_workflow", version: "1.0.0", "x-tasknotes": {}, uid: "x" },
+				["type", "version", "x-tasknotes", "uid"]
+			)
+		).toEqual({ uid: "x" });
+	});
+
+	it("picks only allowlisted keys that are present", () => {
+		expect(pickAllowedFrontmatter({ uid: "x", name: "n" }, ["uid", "created"])).toEqual({ uid: "x" });
+		expect(pickAllowedFrontmatter({ uid: "x" }, [])).toEqual({});
+		expect(pickAllowedFrontmatter(null, ["uid"])).toEqual({});
 	});
 });

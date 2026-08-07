@@ -1,4 +1,5 @@
 import { DEFAULT_WORKFLOW_FOLDER, DEFAULT_WORKFLOW_VIEW_PATH } from "./constants";
+import { isReservedFrontmatterKey } from "./workflowParser";
 import type { TaskNotesWorkflowsSettings } from "./types";
 
 export const DEFAULT_SETTINGS: TaskNotesWorkflowsSettings = {
@@ -16,6 +17,7 @@ export const DEFAULT_SETTINGS: TaskNotesWorkflowsSettings = {
 	minIntervalMs: 60_000,
 	uiLanguage: "system",
 	enableCodeSteps: false,
+	allowedFrontmatterKeys: [],
 };
 
 export function normalizeSettings(input: Partial<TaskNotesWorkflowsSettings>): TaskNotesWorkflowsSettings {
@@ -29,5 +31,21 @@ export function normalizeSettings(input: Partial<TaskNotesWorkflowsSettings>): T
 		maxHistoryEntries: Math.max(50, input.maxHistoryEntries ?? DEFAULT_SETTINGS.maxHistoryEntries),
 		minIntervalMs: Math.max(30_000, input.minIntervalMs ?? DEFAULT_SETTINGS.minIntervalMs),
 		uiLanguage: input.uiLanguage?.trim() || DEFAULT_SETTINGS.uiLanguage,
+		allowedFrontmatterKeys: normalizeAllowedFrontmatterKeys(input.allowedFrontmatterKeys),
 	};
+}
+
+export function normalizeAllowedFrontmatterKeys(input: unknown): string[] {
+	if (!Array.isArray(input)) return [...DEFAULT_SETTINGS.allowedFrontmatterKeys];
+	const keys: string[] = [];
+	for (const value of input) {
+		if (typeof value !== "string") continue;
+		const key = value.trim();
+		if (key.length === 0 || keys.includes(key)) continue;
+		// Workflow-owned schema keys can never be allowlisted; stripping one
+		// before validation would invalidate every workflow in the vault.
+		if (isReservedFrontmatterKey(key)) continue;
+		keys.push(key);
+	}
+	return keys;
 }
