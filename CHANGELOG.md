@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.1.4] - 2026-08-09
+
+### Fixed
+
+- The settings page now keeps its normal vertical Obsidian layout when opened directly or through settings search.
+
 ## [0.1.3] - 2026-08-08
 
 ### Fixed
