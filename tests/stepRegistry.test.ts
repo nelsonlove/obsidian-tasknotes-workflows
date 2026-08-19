@@ -105,7 +105,7 @@ describe("shell.run step", () => {
 	) => void;
 
 	function withFakeChildProcess<T>(execFile: ExecFileStub, fn: () => Promise<T>): Promise<T> {
-		// eslint-disable-next-line obsidianmd/no-global-this -- stubbing the desktop `window.require` in a Node test
+		// Stubbing the desktop `window.require` in a Node test.
 		const holder = globalThis as { window?: unknown };
 		const original = holder.window;
 		holder.window = { require: (id: string) => (id === "child_process" ? { execFile } : undefined) };

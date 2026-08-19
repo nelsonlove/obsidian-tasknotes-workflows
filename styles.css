@@ -2257,3 +2257,9 @@ body.tnw-obe-builder-active .obe-builder-cm-hover-doc {
 		margin-inline-start: 0;
 	}
 }
+
+.tnw-settings-reserved-keys-warning {
+	color: var(--text-error);
+	font-size: var(--font-ui-smaller, 12px);
+	margin-bottom: var(--size-4-2, 8px);
+}

@@ -16,6 +16,7 @@ export interface TaskNotesWorkflowsSettings {
 	minIntervalMs: number;
 	uiLanguage: string;
 	enableCodeSteps: boolean;
+	allowedFrontmatterKeys: string[];
 }
 
 export type RunLogLevel = "summary" | "inputs" | "inputs-and-outputs";

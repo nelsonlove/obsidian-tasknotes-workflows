@@ -108,6 +108,10 @@ export default [
 			"no-unused-vars": "off",
 			"@typescript-eslint/no-unused-vars": "warn",
 			"obsidianmd/no-static-styles-assignment": "off",
+			// Popout-window rules are about plugin runtime correctness; the
+			// node test harness has no window and stubs one where needed.
+			"obsidianmd/prefer-window-timers": "off",
+			"obsidianmd/no-global-this": "off",
 		},
 	},
 	prettier,

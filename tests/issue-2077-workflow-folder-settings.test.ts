@@ -5,20 +5,44 @@ import type { TaskNotesWorkflowsSettings } from "../src/types";
 type WorkflowsSettingsTabConstructor = typeof import("../src/settingsTab").WorkflowsSettingsTab;
 
 const textComponents: MockTextComponent[] = [];
+const textAreaComponents: MockTextComponent[] = [];
+
+class MockDivElement {
+	text = "";
+	visible = true;
+
+	setText(value: string): void {
+		this.text = value;
+	}
+
+	toggle(show: boolean): void {
+		this.visible = show;
+	}
+}
 
 class MockContainer {
 	readonly classNames = new Set<string>();
+	readonly divs: MockDivElement[] = [];
 	isConnected = true;
 
-	empty(): void {}
+	empty(): void {
+		this.divs.length = 0;
+	}
 
 	addClass(className: string): void {
 		this.classNames.add(className);
+	}
+
+	createDiv(): MockDivElement {
+		const div = new MockDivElement();
+		this.divs.push(div);
+		return div;
 	}
 }
 
 class MockInputElement {
 	value = "";
+	rows = 0;
 	private readonly listeners = new Map<string, Array<(event: MockEvent) => void>>();
 
 	addEventListener(name: string, callback: (event: MockEvent) => void): void {
@@ -118,6 +142,11 @@ describe("issue #2077 - workflow folder setting input", () => {
 	beforeEach(async () => {
 		vi.resetModules();
 		textComponents.length = 0;
+		textAreaComponents.length = 0;
+		// The settings tab uses window.setTimeout for popout-window
+		// compatibility; the node test environment has no window global.
+		// Aliasing window to globalThis keeps vi.useFakeTimers effective.
+		vi.stubGlobal("window", globalThis);
 		vi.doMock("obsidian", () => ({
 			Notice: class Notice {},
 			PluginSettingTab: class PluginSettingTab {
@@ -141,6 +170,13 @@ describe("issue #2077 - workflow folder setting input", () => {
 				addText(callback: (text: MockTextComponent) => void): this {
 					const text = new MockTextComponent();
 					textComponents.push(text);
+					callback(text);
+					return this;
+				}
+
+				addTextArea(callback: (text: MockTextComponent) => void): this {
+					const text = new MockTextComponent();
+					textAreaComponents.push(text);
 					callback(text);
 					return this;
 				}
@@ -199,6 +235,50 @@ describe("issue #2077 - workflow folder setting input", () => {
 				render: expect.any(Function),
 			}),
 		]);
+	});
+
+	it("commits the frontmatter allowlist and visibly warns about reserved names", () => {
+		const plugin = mockPlugin();
+		const tab = new WorkflowsSettingsTab({} as never, plugin as never);
+		plugin.triggerLocaleChange();
+
+		const textarea = textAreaComponents[0];
+		const warning = (tab as unknown as { containerEl: MockContainer }).containerEl.divs[0];
+		expect(warning.visible).toBe(false);
+
+		textarea.setValue("uid\ntype\ncreated");
+		textarea.inputEl.blur();
+
+		// Reserved names are dropped from the saved list, with visible feedback.
+		expect(plugin.settings.allowedFrontmatterKeys).toEqual(["uid", "created"]);
+		expect(plugin.saveSettingsAndReload).toHaveBeenCalledTimes(1);
+		expect(warning.visible).toBe(true);
+		expect(warning.text).toContain("reservedIgnored");
+
+		// Removing the reserved name clears the warning without a redundant save.
+		textarea.setValue("uid\ncreated");
+		textarea.inputEl.blur();
+		expect(warning.visible).toBe(false);
+		expect(plugin.saveSettingsAndReload).toHaveBeenCalledTimes(1);
+	});
+
+	it("commits allowlist typing via the debounced change handler", () => {
+		vi.useFakeTimers();
+		try {
+			const plugin = mockPlugin();
+			new WorkflowsSettingsTab({} as never, plugin as never);
+			plugin.triggerLocaleChange();
+
+			const textarea = textAreaComponents[0];
+			textarea.type("uid");
+			expect(plugin.saveSettingsAndReload).not.toHaveBeenCalled();
+
+			vi.advanceTimersByTime(600);
+			expect(plugin.settings.allowedFrontmatterKeys).toEqual(["uid"]);
+			expect(plugin.saveSettingsAndReload).toHaveBeenCalledTimes(1);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
 
