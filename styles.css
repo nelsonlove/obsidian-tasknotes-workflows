@@ -581,6 +581,12 @@
 	font-weight: var(--font-medium);
 }
 
+.setting-item.tnw-settings {
+	display: block;
+	padding: 0;
+	border: 0;
+}
+
 .tnw-settings .setting-item-description {
 	max-width: 68ch;
 }

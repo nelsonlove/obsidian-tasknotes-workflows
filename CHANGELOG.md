@@ -2,10 +2,33 @@
 
 ## Unreleased
 
+## [0.1.4] - 2026-08-09
+
 ### Fixed
 
-- (#2076) Run log retention cleanup no longer shows ENOENT notices when concurrent workflow runs try to delete the same old detail file. Thanks to @yvos for reporting this.
-- (#2077) Editing the workflow folder setting no longer creates folders for every partial path while typing. Thanks to @yvos for reporting this.
+- The settings page now keeps its normal vertical Obsidian layout when opened directly or through settings search.
+
+## [0.1.3] - 2026-08-08
+
+### Fixed
+
+- Workflow note cards and advanced expression controls now create their interface in the correct Obsidian window, including pop-out windows.
+
+### Changed
+
+- TaskNotes Workflows settings can now be found through Obsidian's settings search.
+- Updated compatibility with Obsidian's current community-plugin review requirements.
+
+## [0.1.2] - 2026-08-07
+
+### Fixed
+
+- (TaskNotes #2076) Run log retention cleanup no longer shows notices when concurrent workflow runs try to delete the same old detail file. Thanks to @yvos for reporting this.
+- (#9, PR #10) Disabled workflows no longer react to TaskNotes events or add skipped runs to the log. Concurrent runs now keep each other's history, and retention reliably removes the oldest runs first. Thanks to @mtmclient and @ludon89 for reporting this, @nelsonlove for the fix, and @kjohnsen for helping review it.
+- (#5, TaskNotes #2077) Editing the workflow folder setting no longer creates folders for every partial path while typing. Thanks to @chmac and @yvos for reporting this.
+- (#6) Workflow, trigger, and step IDs now allow a hyphen to remain while the next part of the ID is typed. Thanks to @chmac for reporting this.
+- (#7) Changing a TaskNotes trigger away from a status-change event now removes hidden status filters from the saved workflow. Thanks to @chmac for reporting this.
+- (#19) Custom TaskNotes fields are now available to the expression validator under `customProperties`. The workflow guide also explains configured property mappings and nested task folders. Thanks to @Mies4GH for reporting this.
 
 ### Added
 
@@ -21,6 +44,7 @@
 - New, edited, default, and explicitly migrated workflow files now validate and write the canonical Runtime profile 0.2 `runtime_workflow` shape. TaskNotes-only scheduler and editor state is stored under `x-tasknotes` extensions.
 - Legacy `tasknotes-workflow` and `schemaVersion: 1` files remain readable without mutation. Saving one through the editor is an explicit canonical conversion.
 - Local TaskNotes steps now execute only in TaskNotes Workflows, while portable actions execute only through the interoperability bridge. The obsolete private runtime-host fallback and uncontracted `runtime.event` trigger were removed.
+- (#4) Documented how `task.patch` can update or remove custom frontmatter properties. Thanks to @techy-robot and @chmac for requesting this.
 
 ## [0.1.1] - 2026-06-01
 
