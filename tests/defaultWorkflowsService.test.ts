@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { validateRuntimeRecord } from "@callumalpass/mdbase-runtime";
 import { DefaultWorkflowsService } from "../src/defaultWorkflowsService";
 import { parseMarkdownFrontmatter } from "../src/frontmatter";
-import { DEFAULT_SETTINGS } from "../src/settings";
+import { DEFAULT_SETTINGS, normalizeSettings } from "../src/settings";
 import { parseWorkflowDefinition } from "../src/workflowParser";
 import type { TaskNotesWorkflowsSettings } from "../src/types";
 
@@ -60,5 +60,20 @@ describe("default workflows service", () => {
 			expect(validateRuntimeRecord(parsed.data).valid, path).toBe(true);
 			expect(result.workflow?.enabled, path).toBe(false);
 		}
+	});
+
+	it("clamps a reserved name key from settings, so a created note keeps its id", async () => {
+		const vault = new MemoryVault();
+		// As if data.json had been hand-edited to a workflow-owned property.
+		const settings = normalizeSettings({ nameKey: "id" });
+		expect(settings.nameKey).toBe("name");
+		const service = new DefaultWorkflowsService({ vault } as never, () => settings);
+
+		await service.ensureDefaultWorkflows();
+
+		const markdown = vault.files.get("TaskNotes/Workflows/clear-scheduled-when-started.md") ?? "";
+		const data = parseMarkdownFrontmatter(markdown).data as Record<string, unknown>;
+		expect(data.id).toBe("clear-scheduled-when-started");
+		expect(data.name).toBe("Clear scheduled when started");
 	});
 });

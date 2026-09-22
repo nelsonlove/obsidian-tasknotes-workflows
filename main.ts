@@ -307,6 +307,7 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 			// pause — records again.
 			if (this.pauseSkips.shouldRecord(detail.workflowId, reason)) {
 				await this.runLogs.recordRun(detail);
+				this.pauseSkips.markRecorded(detail.workflowId, reason);
 				await this.refreshWorkflowLastRun(detail.workflowId);
 				await this.renderWorkflowBaseViews();
 				refreshWorkflowNoteCards(this, workflow.file.path);

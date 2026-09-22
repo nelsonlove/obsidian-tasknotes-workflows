@@ -72,11 +72,19 @@ function unreadableReason(file: unknown, isNote: boolean): string {
 export class PauseSkipLog {
 	private readonly lastReasons = new Map<string, string>();
 
-	/** True the first time a workflow is blocked, and again if the pause changes. */
+	/**
+	 * True the first time a workflow is blocked, and again if the pause
+	 * changes. Asking does not mark: the caller marks with
+	 * {@link markRecorded} once the write has landed, so a failed write is
+	 * retried on the next tick rather than being lost.
+	 */
 	shouldRecord(workflowId: string, reason: string): boolean {
-		if (this.lastReasons.get(workflowId) === reason) return false;
+		return this.lastReasons.get(workflowId) !== reason;
+	}
+
+	/** Records that this pause has been written to the run log. */
+	markRecorded(workflowId: string, reason: string): void {
 		this.lastReasons.set(workflowId, reason);
-		return true;
 	}
 
 	/** Called when a run is not blocked, so the next pause records again. */

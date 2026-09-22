@@ -129,35 +129,57 @@ describe("pause skip log", () => {
 	const REASON = "paused by nelson since 2026-09-22T07:38: vault maintenance";
 	const NEW_REASON = "paused by nelson since 2026-09-23T09:00: second pause";
 
+	/** Drives the log the way executeWorkflow does: ask, write, then mark. */
+	function tick(log: PauseSkipLog, reason: string, recorded: string[], write: () => void = () => undefined): void {
+		if (!log.shouldRecord("rollover", reason)) return;
+		write();
+		log.markRecorded("rollover", reason);
+		recorded.push(reason);
+	}
+
 	it("records one skipped run per pause however many ticks it spans", () => {
 		const log = new PauseSkipLog();
-		const recorded = [];
-		for (let tick = 0; tick < 100; tick += 1) {
-			if (log.shouldRecord("rollover", REASON)) recorded.push(REASON);
-		}
+		const recorded: string[] = [];
+		for (let count = 0; count < 100; count += 1) tick(log, REASON, recorded);
 		expect(recorded).toEqual([REASON]);
 	});
 
 	it("records again when the pause reason changes", () => {
 		const log = new PauseSkipLog();
-		const recorded = [];
-		for (const reason of [REASON, REASON, NEW_REASON, NEW_REASON]) {
-			if (log.shouldRecord("rollover", reason)) recorded.push(reason);
-		}
+		const recorded: string[] = [];
+		for (const reason of [REASON, REASON, NEW_REASON, NEW_REASON]) tick(log, reason, recorded);
 		expect(recorded).toEqual([REASON, NEW_REASON]);
 	});
 
 	it("records again for the next pause once the current one clears", () => {
 		const log = new PauseSkipLog();
-		expect(log.shouldRecord("rollover", REASON)).toBe(true);
-		expect(log.shouldRecord("rollover", REASON)).toBe(false);
+		const recorded: string[] = [];
+		tick(log, REASON, recorded);
+		tick(log, REASON, recorded);
 		log.clear("rollover");
-		expect(log.shouldRecord("rollover", REASON)).toBe(true);
+		tick(log, REASON, recorded);
+		expect(recorded).toEqual([REASON, REASON]);
+	});
+
+	it("retries on the next tick when the write failed", () => {
+		const log = new PauseSkipLog();
+		const recorded: string[] = [];
+		expect(() =>
+			tick(log, REASON, recorded, () => {
+				throw new Error("run log write failed");
+			})
+		).toThrow("run log write failed");
+		expect(recorded).toEqual([]);
+
+		tick(log, REASON, recorded);
+		expect(recorded).toEqual([REASON]);
 	});
 
 	it("keeps workflows apart", () => {
 		const log = new PauseSkipLog();
 		expect(log.shouldRecord("rollover", REASON)).toBe(true);
+		log.markRecorded("rollover", REASON);
+		expect(log.shouldRecord("rollover", REASON)).toBe(false);
 		expect(log.shouldRecord("escalate", REASON)).toBe(true);
 	});
 });

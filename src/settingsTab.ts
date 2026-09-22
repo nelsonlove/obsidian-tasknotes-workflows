@@ -293,18 +293,21 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 	}
 
 	private updateNameKey(value: string): void {
-		const next = normalizeNameKey(value);
 		const previous = this.workflowsPlugin.settings.nameKey;
 		// A workflow-owned key would be consumed as the name on read and
 		// overwritten on the next write-back, destroying a schema field on
 		// every workflow note. Refuse it the way the allowlist does, and keep
-		// the current value.
-		if (next !== DEFAULT_NAME_KEY && isReservedFrontmatterKey(next)) {
+		// the current value. `normalizeNameKey` clamps such a value to `name`,
+		// so the entered text is what is tested here — silently saving `name`
+		// would look like the typed key was accepted.
+		const entered = value.trim();
+		if (entered.length > 0 && entered !== DEFAULT_NAME_KEY && isReservedFrontmatterKey(entered)) {
 			this.renderNameKeyWarning(
-				`"${next}" is a workflow-owned property and cannot be the name key. Keeping "${previous}".`
+				`"${entered}" is a workflow-owned property and cannot be the name key. Keeping "${previous}".`
 			);
 			return;
 		}
+		const next = normalizeNameKey(entered);
 		if (next === previous) return;
 		this.renderNameKeyWarning(this.nameKeyFlipWarning(previous, next));
 		this.workflowsPlugin.settings.nameKey = next;

@@ -76,10 +76,18 @@ export interface WorkflowParseOptions {
 
 export const DEFAULT_NAME_KEY = "name";
 
-/** Trims a configured name key, falling back to `name` for empty input. */
+/**
+ * Trims a configured name key, falling back to `name` for empty input and for
+ * any workflow-owned property. The clamp lives here, at the one function
+ * `normalizeSettings` calls at load, so every path downstream — the creation
+ * paths included, which have no note to read a key from — sees a sane value
+ * even when `data.json` was hand-edited to something like `id`.
+ */
 export function normalizeNameKey(value: unknown): string {
 	if (typeof value !== "string") return DEFAULT_NAME_KEY;
-	return value.trim() || DEFAULT_NAME_KEY;
+	const key = value.trim();
+	if (!key || isReservedFrontmatterKey(key)) return DEFAULT_NAME_KEY;
+	return key;
 }
 
 /**
