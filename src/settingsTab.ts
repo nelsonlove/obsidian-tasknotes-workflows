@@ -31,6 +31,7 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 				aliases: [
 					this.workflowsPlugin.t("settings.workflowFiles.heading"),
 					this.workflowsPlugin.t("settings.triggers.heading"),
+					"Fleet pause",
 					this.workflowsPlugin.t("settings.runLogs.heading"),
 					this.workflowsPlugin.t("settings.language.heading"),
 				],
@@ -176,6 +177,21 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 				})
 			);
 
+		new Setting(containerEl).setName("Fleet pause").setHeading();
+
+		new Setting(containerEl)
+			.setName("Pause note")
+			.setDesc(
+				"Vault path of the fleet pause note. While its `paused` property is true, no workflow runs and each attempt is logged as a skipped run. Leave empty to switch the check off."
+			)
+			.addText((text) => {
+				text.setPlaceholder("00-09 System/.../Pause.md");
+				text.setValue(this.workflowsPlugin.settings.pauseNotePath);
+				this.commitTextOnFinish(text, (value) => {
+					this.updatePauseNotePath(value);
+				});
+			});
+
 		new Setting(containerEl).setName(this.workflowsPlugin.t("settings.runLogs.heading")).setHeading();
 
 		new Setting(containerEl)
@@ -254,6 +270,14 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 		if (next.join("\n") === this.workflowsPlugin.settings.allowedFrontmatterKeys.join("\n")) return;
 		this.workflowsPlugin.settings.allowedFrontmatterKeys = next;
 		void this.workflowsPlugin.saveSettingsAndReload();
+	}
+
+	private updatePauseNotePath(value: string): void {
+		// Empty is a meaningful value here: it turns the pause check off.
+		const next = value.trim();
+		if (next === this.workflowsPlugin.settings.pauseNotePath) return;
+		this.workflowsPlugin.settings.pauseNotePath = next;
+		void this.workflowsPlugin.saveSettings();
 	}
 
 	private renderAllowedKeysWarning(ignored: string[]): void {

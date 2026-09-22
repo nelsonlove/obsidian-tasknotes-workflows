@@ -50,19 +50,8 @@ export class WorkflowEngine {
 			throw new Error(this.t("engine.workflowInvalid", { path: loadedWorkflow.file.path }));
 		}
 
-		const runId = createRunId();
-		const startedAt = new Date();
-		const detail: WorkflowRunDetail = {
-			runId,
-			workflowId: workflow.id,
-			workflowName: workflow.name,
-			workflowPath: loadedWorkflow.file.path,
-			dryRun: options.dryRun === true,
-			startedAt: startedAt.toISOString(),
-			status: "success",
-			trigger: options.trigger,
-			steps: [],
-		};
+		const detail = createRunDetail(loadedWorkflow, workflow, options);
+		const startedAt = new Date(detail.startedAt);
 		const preflightError = this.preflightError(workflow.requires);
 		if (preflightError) {
 			return finishRun(detail, "failed", this.t("engine.preflightFailed", { details: preflightError }));
@@ -298,6 +287,44 @@ export class WorkflowEngine {
 	private concurrencyGroup(workflowId: string, group: string): string {
 		return group === "global" ? "global" : `${group || "workflow"}:${workflowId}`;
 	}
+}
+
+/**
+ * Builds the run record every run starts from. Shared with
+ * {@link createSkippedRunDetail} so a run the plugin refuses before the engine
+ * is reached is logged in exactly the same shape as one the engine skips.
+ */
+function createRunDetail(
+	loadedWorkflow: LoadedWorkflow,
+	workflow: NonNullable<LoadedWorkflow["workflow"]>,
+	options: WorkflowRunOptions
+): WorkflowRunDetail {
+	return {
+		runId: createRunId(),
+		workflowId: workflow.id,
+		workflowName: workflow.name,
+		workflowPath: loadedWorkflow.file.path,
+		dryRun: options.dryRun === true,
+		startedAt: new Date().toISOString(),
+		status: "success",
+		trigger: options.trigger,
+		steps: [],
+	};
+}
+
+/**
+ * Records a run the plugin declined to start — today only the fleet pause — as
+ * a skipped run carrying the reason, so it lands in the same run log and run
+ * history as every other skipped run.
+ */
+export function createSkippedRunDetail(
+	loadedWorkflow: LoadedWorkflow,
+	options: WorkflowRunOptions,
+	reason: string
+): WorkflowRunDetail {
+	const workflow = loadedWorkflow.workflow;
+	if (!workflow) throw new Error(`Workflow is invalid: ${loadedWorkflow.file.path}`);
+	return finishRun(createRunDetail(loadedWorkflow, workflow, options), "skipped", reason);
 }
 
 function interopRequestId(runId: string, stepId: string, itemIndex?: number): string {

@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS: TaskNotesWorkflowsSettings = {
 	uiLanguage: "system",
 	enableCodeSteps: false,
 	allowedFrontmatterKeys: [],
+	pauseNotePath: "",
 };
 
 export function normalizeSettings(input: Partial<TaskNotesWorkflowsSettings>): TaskNotesWorkflowsSettings {
@@ -32,6 +33,9 @@ export function normalizeSettings(input: Partial<TaskNotesWorkflowsSettings>): T
 		minIntervalMs: Math.max(30_000, input.minIntervalMs ?? DEFAULT_SETTINGS.minIntervalMs),
 		uiLanguage: input.uiLanguage?.trim() || DEFAULT_SETTINGS.uiLanguage,
 		allowedFrontmatterKeys: normalizeAllowedFrontmatterKeys(input.allowedFrontmatterKeys),
+		// An empty path is meaningful here (the pause check is off), so this
+		// trims without falling back to the default.
+		pauseNotePath: typeof input.pauseNotePath === "string" ? input.pauseNotePath.trim() : DEFAULT_SETTINGS.pauseNotePath,
 	};
 }
 

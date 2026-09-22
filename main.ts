@@ -2,6 +2,7 @@ import { Notice, Plugin, TFile } from "obsidian";
 import type { BasesViewRegistration } from "obsidian";
 import { DefaultWorkflowsService } from "./src/defaultWorkflowsService";
 import { RunLogService } from "./src/runLogService";
+import { PauseGate } from "./src/pauseGate";
 import { WorkflowScheduler } from "./src/scheduler";
 import { DEFAULT_SETTINGS, normalizeSettings } from "./src/settings";
 import { WorkflowsSettingsTab } from "./src/settingsTab";
@@ -10,7 +11,7 @@ import { setCodeStepPolicy } from "./src/codePolicy";
 import { TaskNotesBridge } from "./src/tasknotesBridge";
 import { WORKFLOW_BASE_VIEW_TYPE } from "./src/constants";
 import { isWorkflowPath } from "./src/path";
-import { WorkflowEngine } from "./src/workflowEngine";
+import { createSkippedRunDetail, WorkflowEngine } from "./src/workflowEngine";
 import { WorkflowRepository } from "./src/workflowRepository";
 import { buildWorkflowBasesViewFactory, WorkflowBasesView } from "./src/workflowBasesView";
 import { refreshWorkflowNoteCards, registerWorkflowNoteCards } from "./src/workflowNoteCard";
@@ -47,6 +48,7 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 	private engine!: WorkflowEngine;
 	private scheduler!: WorkflowScheduler;
 	private defaults!: DefaultWorkflowsService;
+	private pauseGate!: PauseGate;
 	private workflowMigrations!: WorkflowMigrationService;
 	private loadedWorkflows: LoadedWorkflow[] = [];
 	private workflowBaseViews = new Set<WorkflowBasesView>();
@@ -128,6 +130,9 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 			(workflow, options) => this.executeWorkflow(workflow, options)
 		);
 		this.defaults = new DefaultWorkflowsService(this.app, () => this.settings);
+		// One gate per plugin load, so its "pause note unreadable" warning is
+		// logged once rather than once per run.
+		this.pauseGate = new PauseGate(this.app, () => this.settings.pauseNotePath);
 		this.workflowMigrations = new WorkflowMigrationService(
 			this.app,
 			this.repository,
@@ -280,10 +285,30 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 		this.workflowBaseViews.delete(view);
 	}
 
+	/**
+	 * The single choke point every run passes through: scheduled, TaskNotes
+	 * event, Obsidian event, manual command, Bases card, runtime API and
+	 * interoperability action all reach the engine here. The fleet pause is
+	 * checked once, here, for that reason.
+	 */
 	private async executeWorkflow(
 		workflow: LoadedWorkflow,
 		options: WorkflowRunOptions
 	): Promise<WorkflowRunDetail> {
+		const paused = workflow.workflow ? this.pauseGate.check() : { paused: false };
+		if (paused.paused) {
+			const detail = createSkippedRunDetail(workflow, options, paused.reason ?? "paused");
+			await this.runLogs.recordRun(detail);
+			await this.refreshWorkflowLastRun(detail.workflowId);
+			await this.renderWorkflowBaseViews();
+			refreshWorkflowNoteCards(this, workflow.file.path);
+			if (options.manual) {
+				new Notice(
+					`Workflow runs are paused by ${this.settings.pauseNotePath} (${paused.reason ?? "paused"}).`
+				);
+			}
+			return detail;
+		}
 		const detail = await this.engine.runWorkflow(workflow, options);
 		await this.runLogs.recordRun(this.redactRunDetail(detail));
 		await this.refreshWorkflowLastRun(detail.workflowId);

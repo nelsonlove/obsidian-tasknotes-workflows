@@ -42,6 +42,7 @@ class MockContainer {
 
 class MockInputElement {
 	value = "";
+	placeholder = "";
 	rows = 0;
 	private readonly listeners = new Map<string, Array<(event: MockEvent) => void>>();
 
@@ -75,6 +76,11 @@ class MockTextComponent {
 
 	setValue(value: string): this {
 		this.inputEl.value = value;
+		return this;
+	}
+
+	setPlaceholder(value: string): this {
+		this.inputEl.placeholder = value;
 		return this;
 	}
 
@@ -229,6 +235,7 @@ describe("issue #2077 - workflow folder setting input", () => {
 				aliases: [
 					"settings.workflowFiles.heading",
 					"settings.triggers.heading",
+					"Fleet pause",
 					"settings.runLogs.heading",
 					"settings.language.heading",
 				],
