@@ -153,6 +153,15 @@ Workflows are typed YAML pipelines. Advanced guards and computed input values us
 
 See [Workflow Schema](docs/workflow-schema.md) and [AI Agent Authoring Script](docs/ai-agent-authoring-script.md) for the full format.
 
+## Fork (nl line)
+
+This build is `nelsonlove/obsidian-tasknotes-workflows`, versioned `0.1.4-nl.N` so Obsidian's updater never offers the upstream build of the same plugin id as an update to it. Changes on the nl line, on top of upstream 0.1.4:
+
+- **Code steps** — `js.run`, `shell.run` and `obsidian.runCommand` steps, behind the "Allow code steps" setting (off by default).
+- **Extra frontmatter properties** — an allowlist of frontmatter keys that workflow validation accepts and every rewrite preserves verbatim, so vault-convention keys such as `uid` or `created` can live on a workflow note.
+- **Fleet pause** — the "Pause note" setting names a flag note in the vault. While that note's `paused` property is `true` (or the strings `"true"` or `"yes"`), no workflow runs: every attempt is logged as a skipped run with who paused the fleet, since when, and why. The check runs at the one point every run passes through, so scheduled, task-event, Obsidian-event, manual and interoperability runs are all covered. Empty, the default, switches it off. An unreadable flag runs the workflow — inside Obsidian a cold metadata cache is a startup race, not a stop — and warns once per plugin load.
+- **Name key** — the "Name key" setting names the frontmatter key that carries a workflow's display name (default `name`). A vault that titles its notes with another key sets it here; `name` keeps working as a fallback, and a rewrite always writes the name back under the key the note came in with.
+
 ## Development
 
 ```bash
