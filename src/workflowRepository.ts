@@ -1,7 +1,12 @@
 import { normalizePath, TFile, type App } from "obsidian";
 import { parseMarkdownFrontmatter, replaceMarkdownFrontmatter } from "./frontmatter";
 import { isMarkdownFile, isWorkflowPath, safePathSegment } from "./path";
-import { parseWorkflowDefinition, preservedFrontmatterFromSource, workflowToFrontmatter } from "./workflowParser";
+import {
+	parseWorkflowDefinition,
+	preservedFrontmatterFromSource,
+	resolveWorkflowNameKey,
+	workflowToFrontmatter,
+} from "./workflowParser";
 import type {
 	LoadedWorkflow,
 	TaskNotesWorkflowsSettings,
@@ -50,6 +55,7 @@ export class WorkflowRepository {
 			? { workflow: null, diagnostics: [], sourceFormat: "unknown" as const }
 			: parseWorkflowDefinition(parsed.data, source, {
 					allowedFrontmatterKeys: this.getSettings().allowedFrontmatterKeys,
+					nameKey: this.getSettings().nameKey,
 				});
 
 		return {
@@ -68,7 +74,8 @@ export class WorkflowRepository {
 			source,
 			workflowToFrontmatter(
 				workflow,
-				preservedFrontmatterFromSource(source, this.getSettings().allowedFrontmatterKeys)
+				preservedFrontmatterFromSource(source, this.getSettings().allowedFrontmatterKeys),
+				{ nameKey: this.nameKeyForSource(source) }
 			)
 		);
 		await this.app.vault.modify(file, updated);
@@ -79,7 +86,10 @@ export class WorkflowRepository {
 		const folder = normalizePath(this.getSettings().workflowFolder);
 		await this.ensureFolder(folder);
 		const path = await this.uniqueWorkflowPath(folder, workflow.id);
-		const content = `---\n${workflowToFrontmatter(workflow)}---\n\n${body.trim()}\n`;
+		// A new note has no key to keep, so it takes the configured one.
+		const content = `---\n${workflowToFrontmatter(workflow, undefined, {
+			nameKey: this.getSettings().nameKey,
+		})}---\n\n${body.trim()}\n`;
 		const file = await this.app.vault.create(path, content);
 		await this.reload();
 		return await this.loadFile(file);
@@ -94,6 +104,13 @@ export class WorkflowRepository {
 	async findWorkflowFile(path: string): Promise<TFile | null> {
 		const file = this.app.vault.getAbstractFileByPath(normalizePath(path));
 		return isMarkdownFile(file) ? file : null;
+	}
+
+	/** The name key an existing note already uses, so a rewrite keeps it. */
+	private nameKeyForSource(source: string): string {
+		const parsed = parseMarkdownFrontmatter(source);
+		if (parsed.error) return this.getSettings().nameKey;
+		return resolveWorkflowNameKey(parsed.data, this.getSettings().nameKey);
 	}
 
 	private async ensureFolder(folder: string): Promise<void> {

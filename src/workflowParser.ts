@@ -66,6 +66,35 @@ export interface WorkflowParseOptions {
 	 * diagnostics and never become part of the workflow definition.
 	 */
 	allowedFrontmatterKeys?: readonly string[];
+	/**
+	 * Frontmatter key that carries the workflow's display name. When it is
+	 * anything other than `name`, a note using it is read as if the value had
+	 * been written under `name`, and `name` still works as a fallback.
+	 */
+	nameKey?: string;
+}
+
+export const DEFAULT_NAME_KEY = "name";
+
+/** Trims a configured name key, falling back to `name` for empty input. */
+export function normalizeNameKey(value: unknown): string {
+	if (typeof value !== "string") return DEFAULT_NAME_KEY;
+	return value.trim() || DEFAULT_NAME_KEY;
+}
+
+/**
+ * Decides which frontmatter key a given note's name is read from: the
+ * configured key when that key carries a usable value, `name` otherwise. The
+ * write paths call this on a note's existing frontmatter so a rewrite puts the
+ * name back under the key the note already used, and a note that came in with
+ * `title` never grows a `name`.
+ */
+export function resolveWorkflowNameKey(data: unknown, nameKey?: string): string {
+	const configured = normalizeNameKey(nameKey);
+	if (configured === DEFAULT_NAME_KEY) return DEFAULT_NAME_KEY;
+	if (!isRecord(data)) return DEFAULT_NAME_KEY;
+	const value = data[configured];
+	return typeof value === "string" && value.trim().length > 0 ? configured : DEFAULT_NAME_KEY;
 }
 
 export function parseWorkflowDefinition(
@@ -91,11 +120,21 @@ export function parseWorkflowDefinition(
 			],
 		};
 	}
+	// The configured name key is schema for this read, not passthrough: it is
+	// held back from the allowlist and then folded onto `name`, so neither the
+	// allowlist check nor the runtime validator sees it as an extra property.
+	const nameSourceKey = resolveWorkflowNameKey(input, options.nameKey);
+	const allowedFrontmatterKeys = (options.allowedFrontmatterKeys ?? []).filter(
+		(key) => key !== nameSourceKey
+	);
 	// Strip allowlisted keys BEFORE format detection so detection and
 	// validation see the same cleaned record. (Reserved keys can never be
 	// allowlisted, so the detection markers type/version/schemaVersion are
 	// also safe by vocabulary — the ordering makes it hold by construction.)
-	const data = partitionAllowedFrontmatter(input, options.allowedFrontmatterKeys ?? []).workflow;
+	const data = foldNameKey(
+		partitionAllowedFrontmatter(input, allowedFrontmatterKeys).workflow,
+		nameSourceKey
+	);
 	const sourceFormat = detectWorkflowSourceFormat(data);
 
 	if (sourceFormat === "runtime-v0.2") {
@@ -188,11 +227,27 @@ export function parseWorkflowDefinition(
 	return { workflow, diagnostics, sourceFormat };
 }
 
+export interface WorkflowSerializeOptions {
+	/**
+	 * Frontmatter key to write the workflow's display name under. Write paths
+	 * pass the key the note was read with, so a `title`-keyed note stays
+	 * `title`-keyed and never grows a `name`.
+	 */
+	nameKey?: string;
+}
+
 export function workflowToFrontmatter(
 	workflow: WorkflowDefinition,
-	preservedFrontmatter?: Record<string, unknown>
+	preservedFrontmatter?: Record<string, unknown>,
+	options: WorkflowSerializeOptions = {}
 ): string {
-	const record: Record<string, unknown> = workflowToRuntimeRecord(workflow);
+	// The runtime record is built, and validated, with the canonical `name`;
+	// the rename happens afterwards so the schema check never sees the vault's
+	// key.
+	const record: Record<string, unknown> = renameNameKey(
+		workflowToRuntimeRecord(workflow),
+		normalizeNameKey(options.nameKey)
+	);
 	// Collisions are structurally impossible when `preservedFrontmatter` comes
 	// from pickAllowedFrontmatter: the runtime record only emits reserved keys
 	// (schema fields plus `x-` extensions), and reserved keys are never routed
@@ -233,6 +288,38 @@ function partitionAllowedFrontmatter(
 		}
 	}
 	return { workflow, preserved };
+}
+
+/**
+ * Rewrites a parsed record so the name lives under `name`, whatever key it
+ * arrived in. The source key wins over an existing `name` — a note carrying
+ * both is read by the configured key.
+ */
+function foldNameKey(data: Record<string, unknown>, nameSourceKey: string): Record<string, unknown> {
+	if (nameSourceKey === DEFAULT_NAME_KEY) return data;
+	const folded: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(data)) {
+		if (key === nameSourceKey || key === DEFAULT_NAME_KEY) continue;
+		folded[key] = value;
+	}
+	folded[DEFAULT_NAME_KEY] = data[nameSourceKey];
+	return folded;
+}
+
+/**
+ * Inverse of {@link foldNameKey} for the write paths: emits the name under the
+ * vault's key, in the place the canonical `name` held, so key order is stable
+ * across rewrites.
+ */
+function renameNameKey(record: Record<string, unknown>, nameKey: string): Record<string, unknown> {
+	if (nameKey === DEFAULT_NAME_KEY || !(DEFAULT_NAME_KEY in record)) return record;
+	const renamed: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(record)) {
+		if (key === nameKey) continue;
+		if (key === DEFAULT_NAME_KEY) renamed[nameKey] = value;
+		else renamed[key] = value;
+	}
+	return renamed;
 }
 
 /**

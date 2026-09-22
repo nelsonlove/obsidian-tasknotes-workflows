@@ -79,13 +79,22 @@ class MemoryVault {
 	}
 }
 
-function setup(allowedFrontmatterKeys: string[]): { vault: MemoryVault; repository: WorkflowRepository } {
+function setup(
+	allowedFrontmatterKeys: string[],
+	options: { nameKey?: string; content?: string } = {}
+): { vault: MemoryVault; repository: WorkflowRepository } {
 	const vault = new MemoryVault();
-	vault.add("TaskNotes/Workflows/auto-start.md", RUNTIME_WITH_VAULT_KEYS);
-	const settings = { ...DEFAULT_SETTINGS, allowedFrontmatterKeys };
+	vault.add("TaskNotes/Workflows/auto-start.md", options.content ?? RUNTIME_WITH_VAULT_KEYS);
+	const settings = {
+		...DEFAULT_SETTINGS,
+		allowedFrontmatterKeys,
+		nameKey: options.nameKey ?? DEFAULT_SETTINGS.nameKey,
+	};
 	const repository = new WorkflowRepository({ vault } as never, () => settings);
 	return { vault, repository };
 }
+
+const RUNTIME_TITLE_KEYED = RUNTIME_WITH_VAULT_KEYS.replace("name: Auto start", "title: Auto start");
 
 describe("workflow repository frontmatter allowlist", () => {
 	it("loads a workflow with allowlisted vault keys without diagnostics", async () => {
@@ -123,5 +132,39 @@ describe("workflow repository frontmatter allowlist", () => {
 		const [loaded] = await repository.reload();
 		// created is not allowlisted, so the note still fails runtime validation.
 		expect(loaded?.workflow).toBeNull();
+	});
+});
+
+describe("workflow repository name key", () => {
+	it("loads a title-keyed workflow and rewrites it under title, never name", async () => {
+		const { vault, repository } = setup(["uid", "created"], {
+			nameKey: "title",
+			content: RUNTIME_TITLE_KEYED,
+		});
+		const [loaded] = await repository.reload();
+		expect(loaded?.diagnostics).toEqual([]);
+		expect(loaded?.workflow?.name).toBe("Auto start");
+
+		await repository.saveWorkflow(loaded.file, { ...loaded.workflow!, enabled: false });
+
+		const saved = vault.files.get("TaskNotes/Workflows/auto-start.md")?.content ?? "";
+		const data = parseMarkdownFrontmatter(saved).data as Record<string, unknown>;
+		expect(data.title).toBe("Auto start");
+		expect(data).not.toHaveProperty("name");
+		expect(data.enabled).toBe(false);
+		expect(data.uid).toBe("20260806-abc");
+	});
+
+	it("keeps a name-keyed workflow on name even when the setting says title", async () => {
+		const { vault, repository } = setup(["uid", "created"], { nameKey: "title" });
+		const [loaded] = await repository.reload();
+		expect(loaded?.workflow?.name).toBe("Auto start");
+
+		await repository.saveWorkflow(loaded.file, { ...loaded.workflow!, enabled: false });
+
+		const saved = vault.files.get("TaskNotes/Workflows/auto-start.md")?.content ?? "";
+		const data = parseMarkdownFrontmatter(saved).data as Record<string, unknown>;
+		expect(data.name).toBe("Auto start");
+		expect(data).not.toHaveProperty("title");
 	});
 });

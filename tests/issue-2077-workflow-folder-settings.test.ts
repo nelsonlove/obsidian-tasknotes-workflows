@@ -234,6 +234,7 @@ describe("issue #2077 - workflow folder setting input", () => {
 				name: "common.appName",
 				aliases: [
 					"settings.workflowFiles.heading",
+					"Frontmatter",
 					"settings.triggers.heading",
 					"Fleet pause",
 					"settings.runLogs.heading",

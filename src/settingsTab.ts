@@ -9,7 +9,7 @@ import {
 } from "obsidian";
 import { DEFAULT_WORKFLOW_FOLDER, DEFAULT_WORKFLOW_VIEW_PATH } from "./constants";
 import { normalizeAllowedFrontmatterKeys } from "./settings";
-import { isReservedFrontmatterKey } from "./workflowParser";
+import { DEFAULT_NAME_KEY, isReservedFrontmatterKey, normalizeNameKey } from "./workflowParser";
 import type TaskNotesWorkflowsPlugin from "../main";
 
 export class WorkflowsSettingsTab extends PluginSettingTab {
@@ -30,6 +30,7 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 				name: this.workflowsPlugin.t("common.appName"),
 				aliases: [
 					this.workflowsPlugin.t("settings.workflowFiles.heading"),
+					"Frontmatter",
 					this.workflowsPlugin.t("settings.triggers.heading"),
 					"Fleet pause",
 					this.workflowsPlugin.t("settings.runLogs.heading"),
@@ -105,6 +106,21 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 			});
 		this.allowedKeysWarningEl = containerEl.createDiv({ cls: "tnw-settings-reserved-keys-warning" });
 		this.allowedKeysWarningEl.toggle(false);
+
+		new Setting(containerEl).setName("Frontmatter").setHeading();
+
+		new Setting(containerEl)
+			.setName("Name key")
+			.setDesc(
+				"The frontmatter key that carries the workflow's display name. Default \"name\"; a vault whose notes title themselves with another key sets it here. A note that already uses `name` keeps it."
+			)
+			.addText((text) => {
+				text.setPlaceholder(DEFAULT_NAME_KEY);
+				text.setValue(this.workflowsPlugin.settings.nameKey);
+				this.commitTextOnFinish(text, (value) => {
+					this.updateNameKey(value);
+				});
+			});
 
 		new Setting(containerEl)
 			.setName("Allow code steps")
@@ -269,6 +285,13 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 		const next = normalizeAllowedFrontmatterKeys(entered);
 		if (next.join("\n") === this.workflowsPlugin.settings.allowedFrontmatterKeys.join("\n")) return;
 		this.workflowsPlugin.settings.allowedFrontmatterKeys = next;
+		void this.workflowsPlugin.saveSettingsAndReload();
+	}
+
+	private updateNameKey(value: string): void {
+		const next = normalizeNameKey(value);
+		if (next === this.workflowsPlugin.settings.nameKey) return;
+		this.workflowsPlugin.settings.nameKey = next;
 		void this.workflowsPlugin.saveSettingsAndReload();
 	}
 
