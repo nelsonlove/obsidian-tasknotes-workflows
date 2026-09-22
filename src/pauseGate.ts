@@ -1,4 +1,4 @@
-import { normalizePath, TFile, type App } from "obsidian";
+import { normalizePath, TFile, TFolder, type App } from "obsidian";
 
 export interface PauseState {
 	/** True only when the pause note exists, is cached, and says paused. */
@@ -34,27 +34,54 @@ export class PauseGate {
 
 		const path = normalizePath(configured);
 		const file = this.app.vault.getAbstractFileByPath(path);
-		const frontmatter = file instanceof TFile
+		const isNote = file instanceof TFile && file.extension === "md";
+		const frontmatter = isNote
 			? this.app.metadataCache.getFileCache(file)?.frontmatter
 			: undefined;
 		if (!frontmatter) {
-			this.warnOnce(path, file instanceof TFile);
+			this.warnOnce(path, unreadableReason(file, isNote));
 			return NOT_PAUSED;
 		}
 		if (!isPausedValue(frontmatter.paused)) return NOT_PAUSED;
 		return { paused: true, reason: pauseReason(path, frontmatter) };
 	}
 
-	private warnOnce(path: string, fileExists: boolean): void {
+	private warnOnce(path: string, reason: string): void {
 		// One warning per plugin load per path, not one per run: a scheduled
 		// vault would otherwise log the same line every minute.
 		if (this.warnedPaths.has(path)) return;
 		this.warnedPaths.add(path);
-		console.warn(
-			fileExists
-				? `TaskNotes Workflows: the pause note "${path}" has no frontmatter; workflows run normally.`
-				: `TaskNotes Workflows: the pause note "${path}" was not found; workflows run normally.`
-		);
+		console.warn(`TaskNotes Workflows: the pause note "${path}" ${reason}; workflows run normally.`);
+	}
+}
+
+/** Says what is actually at the configured path, not merely that it failed. */
+function unreadableReason(file: unknown, isNote: boolean): string {
+	if (file instanceof TFolder) return "is a folder, not a note";
+	if (file instanceof TFile && !isNote) return "is not a markdown note";
+	if (file === null || file === undefined) return "was not found";
+	return "has no frontmatter";
+}
+
+/**
+ * Remembers which pause each workflow was last logged against, so a pause that
+ * lasts hours leaves one skipped run per workflow instead of one per tick. An
+ * interval workflow running every 30 seconds would otherwise write 2,880
+ * records a day and push the vault's real run history out through retention.
+ */
+export class PauseSkipLog {
+	private readonly lastReasons = new Map<string, string>();
+
+	/** True the first time a workflow is blocked, and again if the pause changes. */
+	shouldRecord(workflowId: string, reason: string): boolean {
+		if (this.lastReasons.get(workflowId) === reason) return false;
+		this.lastReasons.set(workflowId, reason);
+		return true;
+	}
+
+	/** Called when a run is not blocked, so the next pause records again. */
+	clear(workflowId: string): void {
+		this.lastReasons.delete(workflowId);
 	}
 }
 

@@ -8,12 +8,14 @@ import {
 	type TextComponent,
 } from "obsidian";
 import { DEFAULT_WORKFLOW_FOLDER, DEFAULT_WORKFLOW_VIEW_PATH } from "./constants";
+import { parseMarkdownFrontmatter } from "./frontmatter";
 import { normalizeAllowedFrontmatterKeys } from "./settings";
 import { DEFAULT_NAME_KEY, isReservedFrontmatterKey, normalizeNameKey } from "./workflowParser";
 import type TaskNotesWorkflowsPlugin from "../main";
 
 export class WorkflowsSettingsTab extends PluginSettingTab {
 	private allowedKeysWarningEl: HTMLElement | null = null;
+	private nameKeyWarningEl: HTMLElement | null = null;
 
 	constructor(app: App, private readonly workflowsPlugin: TaskNotesWorkflowsPlugin) {
 		super(app, workflowsPlugin);
@@ -121,6 +123,8 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 					this.updateNameKey(value);
 				});
 			});
+		this.nameKeyWarningEl = containerEl.createDiv({ cls: "tnw-settings-reserved-keys-warning" });
+		this.nameKeyWarningEl.toggle(false);
 
 		new Setting(containerEl)
 			.setName("Allow code steps")
@@ -290,9 +294,46 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 
 	private updateNameKey(value: string): void {
 		const next = normalizeNameKey(value);
-		if (next === this.workflowsPlugin.settings.nameKey) return;
+		const previous = this.workflowsPlugin.settings.nameKey;
+		// A workflow-owned key would be consumed as the name on read and
+		// overwritten on the next write-back, destroying a schema field on
+		// every workflow note. Refuse it the way the allowlist does, and keep
+		// the current value.
+		if (next !== DEFAULT_NAME_KEY && isReservedFrontmatterKey(next)) {
+			this.renderNameKeyWarning(
+				`"${next}" is a workflow-owned property and cannot be the name key. Keeping "${previous}".`
+			);
+			return;
+		}
+		if (next === previous) return;
+		this.renderNameKeyWarning(this.nameKeyFlipWarning(previous, next));
 		this.workflowsPlugin.settings.nameKey = next;
 		void this.workflowsPlugin.saveSettingsAndReload();
+	}
+
+	/**
+	 * Going back to `name` stops holding the old key back from the allowlist,
+	 * so every note that titles itself with it becomes invalid at once. Say so,
+	 * with the count; migrating the notes stays the operator's call.
+	 */
+	private nameKeyFlipWarning(previous: string, next: string): string {
+		if (next !== DEFAULT_NAME_KEY || previous === DEFAULT_NAME_KEY) return "";
+		if (this.workflowsPlugin.settings.allowedFrontmatterKeys.includes(previous)) return "";
+		const affected = this.workflowsPlugin.workflows.filter((loaded) => {
+			const parsed = parseMarkdownFrontmatter(loaded.source);
+			if (parsed.error || parsed.data === null || typeof parsed.data !== "object") return false;
+			const data = parsed.data as Record<string, unknown>;
+			return previous in data && !(DEFAULT_NAME_KEY in data);
+		}).length;
+		if (affected === 0) return "";
+		return `${affected} workflow ${affected === 1 ? "note" : "notes"} name themselves with "${previous}" and have no "${DEFAULT_NAME_KEY}". They will not load until "${previous}" is added to "Extra frontmatter properties" or renamed to "${DEFAULT_NAME_KEY}". Nothing was migrated for you.`;
+	}
+
+	private renderNameKeyWarning(message: string): void {
+		const warningEl = this.nameKeyWarningEl;
+		if (!warningEl) return;
+		warningEl.setText(message);
+		warningEl.toggle(message.length > 0);
 	}
 
 	private updatePauseNotePath(value: string): void {

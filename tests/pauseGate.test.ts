@@ -1,6 +1,6 @@
-import { TFile } from "obsidian";
+import { TFile, TFolder } from "obsidian";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PauseGate, isPausedValue } from "../src/pauseGate";
+import { PauseGate, PauseSkipLog, isPausedValue } from "../src/pauseGate";
 
 const PAUSE_PATH = "00-09 System/00 System management/00.08 Operator's console/Pause.md";
 
@@ -77,6 +77,31 @@ describe("pause gate", () => {
 		expect(warn).toHaveBeenCalledTimes(1);
 	});
 
+	it("says a folder is a folder", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const folder = new TFolder();
+		folder.path = PAUSE_PATH;
+		const app = {
+			vault: { getAbstractFileByPath: () => folder },
+			metadataCache: { getFileCache: () => null },
+		} as never;
+		expect(new PauseGate(app, () => PAUSE_PATH).check().paused).toBe(false);
+		expect(warn.mock.calls[0]?.[0]).toContain("is a folder, not a note");
+	});
+
+	it("says a non-markdown file is not a markdown note", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const file = new TFile();
+		file.path = "pause.canvas";
+		file.extension = "canvas";
+		const app = {
+			vault: { getAbstractFileByPath: () => file },
+			metadataCache: { getFileCache: () => ({ frontmatter: { paused: true } }) },
+		} as never;
+		expect(new PauseGate(app, () => "pause.canvas").check().paused).toBe(false);
+		expect(warn.mock.calls[0]?.[0]).toContain("is not a markdown note");
+	});
+
 	it("is off, and silent, when no pause note is configured", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 		const gate = new PauseGate(emptyApp(), () => "   ");
@@ -97,5 +122,42 @@ describe("isPausedValue", () => {
 		expect(isPausedValue(false)).toBe(false);
 		expect(isPausedValue(undefined)).toBe(false);
 		expect(isPausedValue(1)).toBe(false);
+	});
+});
+
+describe("pause skip log", () => {
+	const REASON = "paused by nelson since 2026-09-22T07:38: vault maintenance";
+	const NEW_REASON = "paused by nelson since 2026-09-23T09:00: second pause";
+
+	it("records one skipped run per pause however many ticks it spans", () => {
+		const log = new PauseSkipLog();
+		const recorded = [];
+		for (let tick = 0; tick < 100; tick += 1) {
+			if (log.shouldRecord("rollover", REASON)) recorded.push(REASON);
+		}
+		expect(recorded).toEqual([REASON]);
+	});
+
+	it("records again when the pause reason changes", () => {
+		const log = new PauseSkipLog();
+		const recorded = [];
+		for (const reason of [REASON, REASON, NEW_REASON, NEW_REASON]) {
+			if (log.shouldRecord("rollover", reason)) recorded.push(reason);
+		}
+		expect(recorded).toEqual([REASON, NEW_REASON]);
+	});
+
+	it("records again for the next pause once the current one clears", () => {
+		const log = new PauseSkipLog();
+		expect(log.shouldRecord("rollover", REASON)).toBe(true);
+		expect(log.shouldRecord("rollover", REASON)).toBe(false);
+		log.clear("rollover");
+		expect(log.shouldRecord("rollover", REASON)).toBe(true);
+	});
+
+	it("keeps workflows apart", () => {
+		const log = new PauseSkipLog();
+		expect(log.shouldRecord("rollover", REASON)).toBe(true);
+		expect(log.shouldRecord("escalate", REASON)).toBe(true);
 	});
 });

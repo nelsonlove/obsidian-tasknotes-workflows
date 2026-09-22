@@ -36,6 +36,11 @@ export class TFile {
 	extension = "md";
 }
 
+export class TFolder {
+	path = "";
+	name = "";
+}
+
 export class Plugin {}
 
 export class ItemView {}

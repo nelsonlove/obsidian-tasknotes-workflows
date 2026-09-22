@@ -2,7 +2,7 @@ import { Notice, Plugin, TFile } from "obsidian";
 import type { BasesViewRegistration } from "obsidian";
 import { DefaultWorkflowsService } from "./src/defaultWorkflowsService";
 import { RunLogService } from "./src/runLogService";
-import { PauseGate } from "./src/pauseGate";
+import { PauseGate, PauseSkipLog } from "./src/pauseGate";
 import { WorkflowScheduler } from "./src/scheduler";
 import { DEFAULT_SETTINGS, normalizeSettings } from "./src/settings";
 import { WorkflowsSettingsTab } from "./src/settingsTab";
@@ -49,6 +49,7 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 	private scheduler!: WorkflowScheduler;
 	private defaults!: DefaultWorkflowsService;
 	private pauseGate!: PauseGate;
+	private readonly pauseSkips = new PauseSkipLog();
 	private workflowMigrations!: WorkflowMigrationService;
 	private loadedWorkflows: LoadedWorkflow[] = [];
 	private workflowBaseViews = new Set<WorkflowBasesView>();
@@ -298,18 +299,24 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 	): Promise<WorkflowRunDetail> {
 		const paused = workflow.workflow ? this.pauseGate.check() : { paused: false };
 		if (paused.paused) {
-			const detail = createSkippedRunDetail(workflow, options, paused.reason ?? "paused");
-			await this.runLogs.recordRun(detail);
-			await this.refreshWorkflowLastRun(detail.workflowId);
-			await this.renderWorkflowBaseViews();
-			refreshWorkflowNoteCards(this, workflow.file.path);
+			const reason = paused.reason ?? "paused";
+			const detail = createSkippedRunDetail(workflow, options, reason);
+			// One record per workflow per pause, not one per tick: a pause that
+			// outlasts an interval workflow would otherwise flush the vault's
+			// real run history out through retention. A changed reason — a new
+			// pause — records again.
+			if (this.pauseSkips.shouldRecord(detail.workflowId, reason)) {
+				await this.runLogs.recordRun(detail);
+				await this.refreshWorkflowLastRun(detail.workflowId);
+				await this.renderWorkflowBaseViews();
+				refreshWorkflowNoteCards(this, workflow.file.path);
+			}
 			if (options.manual) {
-				new Notice(
-					`Workflow runs are paused by ${this.settings.pauseNotePath} (${paused.reason ?? "paused"}).`
-				);
+				new Notice(`Workflow runs are paused by ${this.settings.pauseNotePath} (${reason}).`);
 			}
 			return detail;
 		}
+		if (workflow.workflow) this.pauseSkips.clear(workflow.workflow.id);
 		const detail = await this.engine.runWorkflow(workflow, options);
 		await this.runLogs.recordRun(this.redactRunDetail(detail));
 		await this.refreshWorkflowLastRun(detail.workflowId);

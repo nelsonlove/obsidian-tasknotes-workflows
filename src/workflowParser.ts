@@ -92,6 +92,12 @@ export function normalizeNameKey(value: unknown): string {
 export function resolveWorkflowNameKey(data: unknown, nameKey?: string): string {
 	const configured = normalizeNameKey(nameKey);
 	if (configured === DEFAULT_NAME_KEY) return DEFAULT_NAME_KEY;
+	// A workflow-owned key can never be the name key: reading the name from
+	// `id` or `enabled` would consume that schema field, and writing it back
+	// would overwrite it on the next rewrite. The settings tab refuses these,
+	// and this clamp covers a value persisted before that guard existed or
+	// edited into data.json by hand.
+	if (isReservedFrontmatterKey(configured)) return DEFAULT_NAME_KEY;
 	if (!isRecord(data)) return DEFAULT_NAME_KEY;
 	const value = data[configured];
 	return typeof value === "string" && value.trim().length > 0 ? configured : DEFAULT_NAME_KEY;

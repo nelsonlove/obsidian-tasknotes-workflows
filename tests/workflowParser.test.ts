@@ -559,6 +559,25 @@ describe("workflow name key", () => {
 		expect(result.workflow?.name).toBe("Auto start");
 	});
 
+	it("refuses a workflow-owned key as the name key", () => {
+		for (const reserved of ["id", "enabled", "description", "steps", "x-tasknotes"]) {
+			expect(resolveWorkflowNameKey({ [reserved]: "Auto start" }, reserved)).toBe("name");
+		}
+		expect(resolveWorkflowNameKey({ title: "Auto start" }, "title")).toBe("title");
+	});
+
+	it("ignores a reserved name key on parse, leaving the schema field intact", () => {
+		const { title, ...nameKeyed } = titleKeyed;
+		const result = parseWorkflowDefinition(
+			{ ...nameKeyed, name: title, description: "What it does" },
+			"",
+			{ nameKey: "description" }
+		);
+		expect(result.diagnostics).toEqual([]);
+		expect(result.workflow?.name).toBe("Auto start");
+		expect(result.workflow?.description).toBe("What it does");
+	});
+
 	it("round-trips a title-keyed note without growing a name", () => {
 		const parsed = parseWorkflowDefinition(titleKeyed, "", { nameKey: "title" });
 		const frontmatter = workflowToFrontmatter(parsed.workflow!, undefined, { nameKey: "title" });
