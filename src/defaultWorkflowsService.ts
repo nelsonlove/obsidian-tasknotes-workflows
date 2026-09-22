@@ -27,7 +27,10 @@ export class DefaultWorkflowsService {
 		const written: string[] = [];
 		for (const workflow of defaultWorkflows(folder)) {
 			if (await this.app.vault.adapter.exists(workflow.path)) continue;
-			await this.app.vault.create(workflow.path, canonicalWorkflowMarkdown(workflow.content));
+			await this.app.vault.create(
+				workflow.path,
+				canonicalWorkflowMarkdown(workflow.content, this.getSettings().nameKey)
+			);
 			written.push(workflow.path);
 		}
 		return written;
@@ -55,14 +58,16 @@ export class DefaultWorkflowsService {
 	}
 }
 
-function canonicalWorkflowMarkdown(markdown: string): string {
+function canonicalWorkflowMarkdown(markdown: string, nameKey?: string): string {
 	const parsed = parseMarkdownFrontmatter(markdown);
 	if (parsed.error) throw new Error(parsed.error);
-	const result = parseWorkflowDefinition(parsed.data, markdown);
+	// The bundled templates always carry `name`; the created file is written
+	// with the vault's key.
+	const result = parseWorkflowDefinition(parsed.data, markdown, { nameKey });
 	if (!result.workflow) {
 		throw new Error(result.diagnostics.map((diagnostic) => `${diagnostic.path}: ${diagnostic.message}`).join("; "));
 	}
-	return replaceMarkdownFrontmatter(markdown, workflowToFrontmatter(result.workflow));
+	return replaceMarkdownFrontmatter(markdown, workflowToFrontmatter(result.workflow, undefined, { nameKey }));
 }
 
 function workflowViewFile(workflowFolder: string): string {

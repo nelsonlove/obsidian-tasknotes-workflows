@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## [0.1.4-nl.4] - 2026-09-22
+
+Fork release (nl line). Not an upstream release.
+
+### Added
+
+- Added a "Pause note" setting under a new **Fleet pause** heading: the vault path of a flag note whose `paused` property (`true`, `"true"` or `"yes"`) stops every workflow run. The check runs once, at the single point every run passes through, so scheduled, task-event, Obsidian-event, manual and interoperability runs are all covered; the pause is recorded in the normal run log as a skipped run carrying who paused the fleet, since when, and why — once per workflow per pause, so a long pause cannot flush real run history out through retention — and a manual run also shows a notice. Empty (the default) switches the check off. A missing note or an empty metadata cache runs the workflow and logs one warning per plugin load, because inside Obsidian an absent cache is a startup race rather than a human saying stop.
+- Added a "Name key" setting under a new **Frontmatter** heading: the frontmatter key that carries a workflow's display name, default `name`. Workflow-owned properties are refused, since reading the name from one would consume that schema field. With it set, a note naming itself with that key parses without the key being flagged as an extra property, `name` still works as a fallback, and every rewrite — the editor save, the enabled toggle, the migration — writes the name back under the key the note already used, so a note never grows a second name property. Workflow notes the plugin creates itself use the configured key.
+
 ## [0.1.4] - 2026-08-09
 
 ### Fixed

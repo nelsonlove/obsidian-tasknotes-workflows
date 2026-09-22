@@ -1,7 +1,12 @@
 import { normalizePath, TFile, type App } from "obsidian";
 import { parseMarkdownFrontmatter, replaceMarkdownFrontmatter } from "./frontmatter";
 import type { WorkflowRepository } from "./workflowRepository";
-import { parseWorkflowDefinition, preservedFrontmatterFromSource, workflowToFrontmatter } from "./workflowParser";
+import {
+	parseWorkflowDefinition,
+	preservedFrontmatterFromSource,
+	resolveWorkflowNameKey,
+	workflowToFrontmatter,
+} from "./workflowParser";
 import type { WorkflowSourceFormat } from "./types";
 
 export interface WorkflowMigrationCandidate {
@@ -37,7 +42,8 @@ export class WorkflowMigrationService {
 	constructor(
 		private readonly app: App,
 		private readonly repository: WorkflowRepository,
-		private readonly getAllowedFrontmatterKeys: () => readonly string[] = () => []
+		private readonly getAllowedFrontmatterKeys: () => readonly string[] = () => [],
+		private readonly getNameKey: () => string = () => "name"
 	) {}
 
 	async analyze(): Promise<WorkflowMigrationReport> {
@@ -64,12 +70,19 @@ export class WorkflowMigrationService {
 			}
 
 			const allowedFrontmatterKeys = this.getAllowedFrontmatterKeys();
+			const nameKey = this.nameKeyForSource(loaded.source);
 			const preserved = preservedFrontmatterFromSource(loaded.source, allowedFrontmatterKeys);
-			const target = replaceMarkdownFrontmatter(loaded.source, workflowToFrontmatter(loaded.workflow, preserved));
+			const target = replaceMarkdownFrontmatter(
+				loaded.source,
+				workflowToFrontmatter(loaded.workflow, preserved, { nameKey })
+			);
 			const parsedTarget = parseMarkdownFrontmatter(target);
 			const verified = parsedTarget.error
 				? null
-				: parseWorkflowDefinition(parsedTarget.data, target, { allowedFrontmatterKeys });
+				: parseWorkflowDefinition(parsedTarget.data, target, {
+						allowedFrontmatterKeys,
+						nameKey: this.getNameKey(),
+					});
 			if (!verified?.workflow || verified.sourceFormat !== "runtime-v0.2") {
 				invalid.push({
 					path: loaded.file.path,
@@ -107,6 +120,13 @@ export class WorkflowMigrationService {
 			candidates,
 			invalid,
 		};
+	}
+
+	/** The name key a note already uses, so migrating it keeps that key. */
+	private nameKeyForSource(source: string): string {
+		const parsed = parseMarkdownFrontmatter(source);
+		if (parsed.error) return this.getNameKey();
+		return resolveWorkflowNameKey(parsed.data, this.getNameKey());
 	}
 
 	async apply(report: WorkflowMigrationReport): Promise<WorkflowMigrationApplyResult> {

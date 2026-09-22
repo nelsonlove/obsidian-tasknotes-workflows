@@ -17,6 +17,10 @@ export interface TaskNotesWorkflowsSettings {
 	uiLanguage: string;
 	enableCodeSteps: boolean;
 	allowedFrontmatterKeys: string[];
+	/** Vault path of the fleet pause flag note. Empty disables the check. */
+	pauseNotePath: string;
+	/** Frontmatter key that carries a workflow's display name. */
+	nameKey: string;
 }
 
 export type RunLogLevel = "summary" | "inputs" | "inputs-and-outputs";

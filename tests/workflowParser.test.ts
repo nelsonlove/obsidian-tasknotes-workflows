@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { validateRuntimeRecord } from "@callumalpass/mdbase-runtime";
 import { parse } from "yaml";
 import { parseMarkdownFrontmatter } from "../src/frontmatter";
-import { parseWorkflowDefinition, pickAllowedFrontmatter, workflowToFrontmatter } from "../src/workflowParser";
+import {
+	parseWorkflowDefinition,
+	pickAllowedFrontmatter,
+	resolveWorkflowNameKey,
+	workflowToFrontmatter,
+} from "../src/workflowParser";
 
 describe("workflow parser", () => {
 	it("parses a valid workflow definition", () => {
@@ -484,5 +489,118 @@ describe("frontmatter allowlist", () => {
 		expect(pickAllowedFrontmatter({ uid: "x", name: "n" }, ["uid", "created"])).toEqual({ uid: "x" });
 		expect(pickAllowedFrontmatter({ uid: "x" }, [])).toEqual({});
 		expect(pickAllowedFrontmatter(null, ["uid"])).toEqual({});
+	});
+});
+
+describe("workflow name key", () => {
+	const titleKeyed = {
+		type: "runtime_workflow",
+		id: "auto-start",
+		version: "1.0.0",
+		title: "Auto start",
+		enabled: true,
+		triggers: [{
+			id: "manual-run",
+			event: { id: "tasknotes-workflows.manual", version: "1.0.0" },
+			"x-tasknotes": { type: "manual" },
+		}],
+		steps: [{
+			id: "notify",
+			action: { id: "notice.show", version: "1.0.0" },
+			input: { message: "hi" },
+		}],
+		run: {
+			concurrency: { group: "workflow", policy: "skip" },
+			limits: { max_items: 1 },
+			on_error: "stop",
+		},
+		"x-tasknotes": { format_version: 1, source: "tasknotes-workflows" },
+	};
+
+	it("reads the name from the configured key when the note has no name", () => {
+		const result = parseWorkflowDefinition(titleKeyed, "", { nameKey: "title" });
+		expect(result.diagnostics).toEqual([]);
+		expect(result.workflow?.name).toBe("Auto start");
+	});
+
+	it("rejects the same note when the name key is not configured", () => {
+		const result = parseWorkflowDefinition(titleKeyed, "");
+		expect(result.workflow).toBeNull();
+		expect(result.diagnostics.some((diagnostic) => diagnostic.severity === "error")).toBe(true);
+	});
+
+	it("prefers the configured key when both keys are present", () => {
+		const result = parseWorkflowDefinition(
+			{ ...titleKeyed, name: "Legacy name" },
+			"",
+			{ nameKey: "title" }
+		);
+		expect(result.diagnostics).toEqual([]);
+		expect(result.workflow?.name).toBe("Auto start");
+	});
+
+	it("falls back to name when the configured key is absent", () => {
+		const { title, ...nameKeyed } = titleKeyed;
+		const result = parseWorkflowDefinition(
+			{ ...nameKeyed, name: title },
+			"",
+			{ nameKey: "title" }
+		);
+		expect(result.diagnostics).toEqual([]);
+		expect(result.workflow?.name).toBe("Auto start");
+	});
+
+	it("reads the configured key even when it is also allowlisted", () => {
+		const result = parseWorkflowDefinition(titleKeyed, "", {
+			nameKey: "title",
+			allowedFrontmatterKeys: ["title", "uid"],
+		});
+		expect(result.diagnostics).toEqual([]);
+		expect(result.workflow?.name).toBe("Auto start");
+	});
+
+	it("refuses a workflow-owned key as the name key", () => {
+		for (const reserved of ["id", "enabled", "description", "steps", "x-tasknotes"]) {
+			expect(resolveWorkflowNameKey({ [reserved]: "Auto start" }, reserved)).toBe("name");
+		}
+		expect(resolveWorkflowNameKey({ title: "Auto start" }, "title")).toBe("title");
+	});
+
+	it("ignores a reserved name key on parse, leaving the schema field intact", () => {
+		const { title, ...nameKeyed } = titleKeyed;
+		const result = parseWorkflowDefinition(
+			{ ...nameKeyed, name: title, description: "What it does" },
+			"",
+			{ nameKey: "description" }
+		);
+		expect(result.diagnostics).toEqual([]);
+		expect(result.workflow?.name).toBe("Auto start");
+		expect(result.workflow?.description).toBe("What it does");
+	});
+
+	it("round-trips a title-keyed note without growing a name", () => {
+		const parsed = parseWorkflowDefinition(titleKeyed, "", { nameKey: "title" });
+		const frontmatter = workflowToFrontmatter(parsed.workflow!, undefined, { nameKey: "title" });
+		const record = parse(frontmatter) as Record<string, unknown>;
+		expect(record.title).toBe("Auto start");
+		expect(record).not.toHaveProperty("name");
+		expect(frontmatter).not.toMatch(/^name:/mu);
+
+		const reparsed = parseWorkflowDefinition(record, frontmatter, { nameKey: "title" });
+		expect(reparsed.diagnostics).toEqual([]);
+		expect(reparsed.workflow?.name).toBe("Auto start");
+		expect(reparsed.sourceFormat).toBe("runtime-v0.2");
+	});
+
+	it("keeps writing name for a name-keyed note", () => {
+		const { title, ...nameKeyed } = titleKeyed;
+		const source = { ...nameKeyed, name: title };
+		const parsed = parseWorkflowDefinition(source, "", { nameKey: "title" });
+		const frontmatter = workflowToFrontmatter(parsed.workflow!, undefined, {
+			nameKey: resolveWorkflowNameKey(source, "title"),
+		});
+		const record = parse(frontmatter) as Record<string, unknown>;
+		expect(record.name).toBe("Auto start");
+		expect(record).not.toHaveProperty("title");
 	});
 });

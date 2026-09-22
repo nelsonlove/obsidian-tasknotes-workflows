@@ -8,12 +8,14 @@ import {
 	type TextComponent,
 } from "obsidian";
 import { DEFAULT_WORKFLOW_FOLDER, DEFAULT_WORKFLOW_VIEW_PATH } from "./constants";
+import { parseMarkdownFrontmatter } from "./frontmatter";
 import { normalizeAllowedFrontmatterKeys } from "./settings";
-import { isReservedFrontmatterKey } from "./workflowParser";
+import { DEFAULT_NAME_KEY, isReservedFrontmatterKey, normalizeNameKey } from "./workflowParser";
 import type TaskNotesWorkflowsPlugin from "../main";
 
 export class WorkflowsSettingsTab extends PluginSettingTab {
 	private allowedKeysWarningEl: HTMLElement | null = null;
+	private nameKeyWarningEl: HTMLElement | null = null;
 
 	constructor(app: App, private readonly workflowsPlugin: TaskNotesWorkflowsPlugin) {
 		super(app, workflowsPlugin);
@@ -30,7 +32,9 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 				name: this.workflowsPlugin.t("common.appName"),
 				aliases: [
 					this.workflowsPlugin.t("settings.workflowFiles.heading"),
+					"Frontmatter",
 					this.workflowsPlugin.t("settings.triggers.heading"),
+					"Fleet pause",
 					this.workflowsPlugin.t("settings.runLogs.heading"),
 					this.workflowsPlugin.t("settings.language.heading"),
 				],
@@ -105,6 +109,23 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 		this.allowedKeysWarningEl = containerEl.createDiv({ cls: "tnw-settings-reserved-keys-warning" });
 		this.allowedKeysWarningEl.toggle(false);
 
+		new Setting(containerEl).setName("Frontmatter").setHeading();
+
+		new Setting(containerEl)
+			.setName("Name key")
+			.setDesc(
+				"The frontmatter key that carries the workflow's display name. Default \"name\"; a vault whose notes title themselves with another key sets it here. A note that already uses `name` keeps it."
+			)
+			.addText((text) => {
+				text.setPlaceholder(DEFAULT_NAME_KEY);
+				text.setValue(this.workflowsPlugin.settings.nameKey);
+				this.commitTextOnFinish(text, (value) => {
+					this.updateNameKey(value);
+				});
+			});
+		this.nameKeyWarningEl = containerEl.createDiv({ cls: "tnw-settings-reserved-keys-warning" });
+		this.nameKeyWarningEl.toggle(false);
+
 		new Setting(containerEl)
 			.setName("Allow code steps")
 			.setDesc(
@@ -175,6 +196,21 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 					}
 				})
 			);
+
+		new Setting(containerEl).setName("Fleet pause").setHeading();
+
+		new Setting(containerEl)
+			.setName("Pause note")
+			.setDesc(
+				"Vault path of the fleet pause note. While its `paused` property is true, no workflow runs and each attempt is logged as a skipped run. Leave empty to switch the check off."
+			)
+			.addText((text) => {
+				text.setPlaceholder("00-09 System/.../Pause.md");
+				text.setValue(this.workflowsPlugin.settings.pauseNotePath);
+				this.commitTextOnFinish(text, (value) => {
+					this.updatePauseNotePath(value);
+				});
+			});
 
 		new Setting(containerEl).setName(this.workflowsPlugin.t("settings.runLogs.heading")).setHeading();
 
@@ -254,6 +290,61 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 		if (next.join("\n") === this.workflowsPlugin.settings.allowedFrontmatterKeys.join("\n")) return;
 		this.workflowsPlugin.settings.allowedFrontmatterKeys = next;
 		void this.workflowsPlugin.saveSettingsAndReload();
+	}
+
+	private updateNameKey(value: string): void {
+		const previous = this.workflowsPlugin.settings.nameKey;
+		// A workflow-owned key would be consumed as the name on read and
+		// overwritten on the next write-back, destroying a schema field on
+		// every workflow note. Refuse it the way the allowlist does, and keep
+		// the current value. `normalizeNameKey` clamps such a value to `name`,
+		// so the entered text is what is tested here — silently saving `name`
+		// would look like the typed key was accepted.
+		const entered = value.trim();
+		if (entered.length > 0 && entered !== DEFAULT_NAME_KEY && isReservedFrontmatterKey(entered)) {
+			this.renderNameKeyWarning(
+				`"${entered}" is a workflow-owned property and cannot be the name key. Keeping "${previous}".`
+			);
+			return;
+		}
+		const next = normalizeNameKey(entered);
+		if (next === previous) return;
+		this.renderNameKeyWarning(this.nameKeyFlipWarning(previous, next));
+		this.workflowsPlugin.settings.nameKey = next;
+		void this.workflowsPlugin.saveSettingsAndReload();
+	}
+
+	/**
+	 * Going back to `name` stops holding the old key back from the allowlist,
+	 * so every note that titles itself with it becomes invalid at once. Say so,
+	 * with the count; migrating the notes stays the operator's call.
+	 */
+	private nameKeyFlipWarning(previous: string, next: string): string {
+		if (next !== DEFAULT_NAME_KEY || previous === DEFAULT_NAME_KEY) return "";
+		if (this.workflowsPlugin.settings.allowedFrontmatterKeys.includes(previous)) return "";
+		const affected = this.workflowsPlugin.workflows.filter((loaded) => {
+			const parsed = parseMarkdownFrontmatter(loaded.source);
+			if (parsed.error || parsed.data === null || typeof parsed.data !== "object") return false;
+			const data = parsed.data as Record<string, unknown>;
+			return previous in data && !(DEFAULT_NAME_KEY in data);
+		}).length;
+		if (affected === 0) return "";
+		return `${affected} workflow ${affected === 1 ? "note" : "notes"} name themselves with "${previous}" and have no "${DEFAULT_NAME_KEY}". They will not load until "${previous}" is added to "Extra frontmatter properties" or renamed to "${DEFAULT_NAME_KEY}". Nothing was migrated for you.`;
+	}
+
+	private renderNameKeyWarning(message: string): void {
+		const warningEl = this.nameKeyWarningEl;
+		if (!warningEl) return;
+		warningEl.setText(message);
+		warningEl.toggle(message.length > 0);
+	}
+
+	private updatePauseNotePath(value: string): void {
+		// Empty is a meaningful value here: it turns the pause check off.
+		const next = value.trim();
+		if (next === this.workflowsPlugin.settings.pauseNotePath) return;
+		this.workflowsPlugin.settings.pauseNotePath = next;
+		void this.workflowsPlugin.saveSettings();
 	}
 
 	private renderAllowedKeysWarning(ignored: string[]): void {
