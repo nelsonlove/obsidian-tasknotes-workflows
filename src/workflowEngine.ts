@@ -1,6 +1,7 @@
 import { conditionsMatch } from "./conditions";
 import { todayString } from "./duration";
 import { createStepExecutionContext, shouldRunStep, StepRegistry } from "./stepRegistry";
+import { isStepFailure } from "./stepFailure";
 import { resolveTemplateValue } from "./template";
 import type { App } from "obsidian";
 import type { ActionOutcome } from "@callumalpass/mdbase-interop";
@@ -264,6 +265,7 @@ export class WorkflowEngine {
 			detail.errorCode = normalizedError.code;
 			detail.errorStatus = normalizedError.status;
 			detail.errorDetails = normalizedError.details;
+			if (isStepFailure(error) && typeof error.output !== "undefined") detail.output = error.output;
 			detail.endedAt = new Date().toISOString();
 			detail.durationMs = Date.now() - startedAt;
 			return detail;
@@ -423,6 +425,9 @@ function normalizeStepError(
 	error: unknown,
 	api: TaskNotesRuntimeApi | null
 ): NormalizedWorkflowError {
+	if (isStepFailure(error)) {
+		return { message: error.message, code: error.code, details: error.details };
+	}
 	const apiError = normalizeApiError(error, api);
 	if (!apiError) return { message: errorMessage(error) };
 	return {

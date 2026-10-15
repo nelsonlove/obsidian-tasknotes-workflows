@@ -2,6 +2,7 @@ import { FileSystemAdapter, normalizePath, Notice, TFile } from "obsidian";
 import * as obsidianModule from "obsidian";
 import { conditionMatches, conditionsMatch } from "./conditions";
 import { getCodeStepPolicy } from "./codePolicy";
+import { StepFailure } from "./stepFailure";
 import { DEFAULT_SOURCE } from "./constants";
 import { defaultRuntimeTaskQuery } from "./taskQuery";
 import { resolveTemplateValue } from "./template";
@@ -792,7 +793,7 @@ function createDefaultSteps(): StepDefinition[] {
 			type: "shell.run",
 			label: "Run shell command",
 			description:
-				'Run a shell command through a login shell (desktop only); awaits it and returns stdout, stderr, and the exit code. Requires "Allow code steps" in settings.',
+				'Run a shell command through a login shell (desktop only); awaits it and returns stdout, stderr, and the exit code. A non-zero exit fails the step. Requires "Allow code steps" in settings.',
 			category: "Obsidian",
 			inputFields: [
 				{
@@ -884,12 +885,25 @@ function createDefaultSteps(): StepDefinition[] {
 								return;
 							}
 							const exitCode = error ? (error.code as number) : 0;
-							resolve({
+							const result = {
 								stdout: stdout ?? "",
 								stderr: stderr ?? "",
 								exitCode,
 								ok: exitCode === 0,
-							});
+							};
+							if (exitCode !== 0) {
+								// A non-zero exit fails the step (and, with onError: stop, the run),
+								// keeping stdout/stderr/exitCode in the step record.
+								const stderrTail = result.stderr.trim().split("\n").slice(-1)[0]?.slice(0, 500);
+								reject(
+									new StepFailure(
+										`shell.run exited with code ${exitCode}${stderrTail ? `: ${stderrTail}` : ""}`,
+										{ code: "shell_nonzero_exit", details: result, output: result }
+									)
+								);
+								return;
+							}
+							resolve(result);
 						}
 					);
 				});
