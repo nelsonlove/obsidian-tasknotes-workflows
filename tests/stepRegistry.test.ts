@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { StepRegistry } from "../src/stepRegistry";
 import { setCodeStepPolicy } from "../src/codePolicy";
+import { StepFailure } from "../src/stepFailure";
 import type { StepExecutionContext } from "../src/types";
 
 describe("step registry", () => {
@@ -157,17 +158,35 @@ describe("shell.run step", () => {
 		expect(output.ok).toBe(true);
 	});
 
-	it("returns a non-zero exit code without throwing", async () => {
+	it("fails the step on a non-zero exit, keeping the exit code, stdout and stderr", async () => {
 		setCodeStepPolicy({ enabled: true });
 		const step = new StepRegistry().get("shell.run");
-		const output = (await withFakeChildProcess(
+		const failure = await withFakeChildProcess(
 			(_file, _args, _options, callback) =>
-				callback(Object.assign(new Error("exit 3"), { code: 3 }), "", "boom"),
-			() => step!.run({ command: "exit 3" }, ctx)
-		)) as { exitCode: number; ok: boolean; stderr: string };
-		expect(output.exitCode).toBe(3);
-		expect(output.ok).toBe(false);
-		expect(output.stderr).toBe("boom");
+				callback(Object.assign(new Error("exit 3"), { code: 3 }), "partial\n", "first\nboom\n"),
+			() => step!.run({ command: "exit 3" }, ctx).then(
+				() => null,
+				(error: unknown) => error
+			)
+		);
+		expect(failure).toBeInstanceOf(StepFailure);
+		const stepFailure = failure as StepFailure;
+		expect(stepFailure.message).toBe("shell.run exited with code 3: boom");
+		expect(stepFailure.code).toBe("shell_nonzero_exit");
+		expect(stepFailure.details).toEqual({ exitCode: 3 });
+		expect(stepFailure.output).toEqual({ stdout: "partial\n", stderr: "first\nboom\n", exitCode: 3, ok: false });
+	});
+
+	it("names only the exit code when a failing command writes no stderr", async () => {
+		setCodeStepPolicy({ enabled: true });
+		const step = new StepRegistry().get("shell.run");
+		await expect(
+			withFakeChildProcess(
+				(_file, _args, _options, callback) =>
+					callback(Object.assign(new Error("exit 1"), { code: 1 }), "", ""),
+				() => step!.run({ command: "false" }, ctx)
+			)
+		).rejects.toThrow(/^shell\.run exited with code 1$/);
 	});
 
 	it("requires desktop Obsidian (throws when Node is unavailable)", async () => {
