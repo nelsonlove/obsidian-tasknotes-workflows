@@ -76,7 +76,7 @@ jobs:
           const versions = JSON.parse(fs.readFileSync("versions.json", "utf8"));
 
           const failures = [];
-          const semverPattern = /^\d+\.\d+\.\d+$/u;
+          const semverPattern = /^\d+\.\d+\.\d+(-nl\.\d+)?$/u;
 
           if (!semverPattern.test(manifest.version)) {
             failures.push(`manifest version must use x.y.z: ${manifest.version}`);
