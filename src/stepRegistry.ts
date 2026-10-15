@@ -894,11 +894,11 @@ function createDefaultSteps(): StepDefinition[] {
 							if (exitCode !== 0) {
 								// A non-zero exit fails the step (and, with onError: stop, the run),
 								// keeping stdout/stderr/exitCode in the step record.
-								const stderrTail = result.stderr.trim().split("\n").slice(-1)[0]?.slice(0, 500);
+								const stderrTail = result.stderr.trim().split(/\r?\n/).slice(-1)[0]?.trim().slice(0, 500);
 								reject(
 									new StepFailure(
 										`shell.run exited with code ${exitCode}${stderrTail ? `: ${stderrTail}` : ""}`,
-										{ code: "shell_nonzero_exit", details: result, output: result }
+										{ code: "shell_nonzero_exit", details: { exitCode }, output: result }
 									)
 								);
 								return;

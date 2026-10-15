@@ -84,7 +84,7 @@ describe("shell.run exit status decides the run status", () => {
 				status: "failed",
 				error: "shell.run exited with code 3: failed with 3",
 				errorCode: "shell_nonzero_exit",
-				errorDetails: { stdout: "", stderr: "failed with 3\n", exitCode: 3, ok: false },
+				errorDetails: { exitCode: 3 },
 				output: { stdout: "", stderr: "failed with 3\n", exitCode: 3, ok: false },
 			})
 		);
@@ -112,7 +112,13 @@ describe("shell.run exit status decides the run status", () => {
 
 	it("leaves onError: continue as it is: the failed step is recorded and later steps still run", async () => {
 		const result = await run(
-			workflow([shellStep("first", "exit 2"), shellStep("second", "echo after")], "continue")
+			workflow(
+				[
+					shellStep("first", "exit 2"),
+					shellStep("second", "echo code={{steps.first.output.exitCode}} ok={{steps.first.output.ok}}"),
+				],
+				"continue"
+			)
 		);
 
 		expect(result.status).toBe("success");
@@ -120,6 +126,25 @@ describe("shell.run exit status decides the run status", () => {
 			["first", "failed"],
 			["second", "success"],
 		]);
-		expect(result.steps[0]?.errorDetails).toEqual(expect.objectContaining({ exitCode: 2 }));
+		expect(result.steps[0]?.errorDetails).toEqual({ exitCode: 2 });
+		// A later step can still branch on the failed command's result.
+		expect(result.steps[1]?.output).toEqual(expect.objectContaining({ stdout: "code=2 ok=false\n" }));
+	});
+
+	it("puts only the last stderr line in the run error, without a carriage return", async () => {
+		const holderWindow = globalThis as { window?: unknown };
+		holderWindow.window = {
+			require: (id: string) =>
+				id === "child_process"
+					? {
+							execFile: (_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
+								callback(Object.assign(new Error("failed"), { code: 4 }), "", "line one\r\nline two\r\n"),
+						}
+					: undefined,
+		};
+		const result = await run(workflow([shellStep("probe", "anything")]));
+
+		expect(result.status).toBe("failed");
+		expect(result.error).toBe("shell.run exited with code 4: line two");
 	});
 });

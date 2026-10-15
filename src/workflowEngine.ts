@@ -398,6 +398,10 @@ function createStepDetail(
 function stepResultRecord(detail: StepRunDetail): WorkflowRunContext["steps"][string] {
 	const result: WorkflowRunContext["steps"][string] = { status: detail.status };
 	if (detail.status === "success") result.output = detail.output;
+	// A step that failed with its own result (a StepFailure, e.g. a non-zero
+	// shell.run exit) keeps that result readable as steps.<id>.output, so a later
+	// step under onError: continue can still branch on it.
+	if (detail.status === "failed" && typeof detail.output !== "undefined") result.output = detail.output;
 	if (detail.status === "skipped" || detail.status === "cancelled") result.output = null;
 	if (detail.error) result.error = detail.error;
 	return result;

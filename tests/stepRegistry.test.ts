@@ -173,8 +173,8 @@ describe("shell.run step", () => {
 		const stepFailure = failure as StepFailure;
 		expect(stepFailure.message).toBe("shell.run exited with code 3: boom");
 		expect(stepFailure.code).toBe("shell_nonzero_exit");
-		expect(stepFailure.details).toEqual({ stdout: "partial\n", stderr: "first\nboom\n", exitCode: 3, ok: false });
-		expect(stepFailure.output).toEqual(stepFailure.details);
+		expect(stepFailure.details).toEqual({ exitCode: 3 });
+		expect(stepFailure.output).toEqual({ stdout: "partial\n", stderr: "first\nboom\n", exitCode: 3, ok: false });
 	});
 
 	it("names only the exit code when a failing command writes no stderr", async () => {
