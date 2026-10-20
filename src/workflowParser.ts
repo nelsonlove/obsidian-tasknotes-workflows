@@ -2,6 +2,7 @@ import { stringify } from "yaml";
 import { LEGACY_WORKFLOW_TYPE, WORKFLOW_TYPE } from "./constants";
 import { parseMarkdownFrontmatter } from "./frontmatter";
 import { isConditionOperator } from "./conditions";
+import { HOST_FRONTMATTER_KEY, parseHostValue } from "./hostGate";
 import { isWorkflowExpression, validateExpressionTree } from "./expressions";
 import {
 	detectWorkflowSourceFormat,
@@ -48,12 +49,13 @@ const TOP_LEVEL_FIELDS = new Set([
 
 /**
  * Keys the workflow formats own: the legacy top-level fields plus the
- * runtime-v0.2 schema's `version`. These can never be allowlisted as extra
+ * runtime-v0.2 schema's `version`, and the fork's `host` (held back from the
+ * runtime schema, see {@link takeHostKey}). These can never be allowlisted as extra
  * frontmatter — stripping one before validation would make every workflow
  * invalid with errors pointing at fields visibly present in the file.
  * `x-` prefixed names are likewise owned (extension namespace).
  */
-const RESERVED_FRONTMATTER_KEYS = new Set([...TOP_LEVEL_FIELDS, "version"]);
+const RESERVED_FRONTMATTER_KEYS = new Set([...TOP_LEVEL_FIELDS, "version", HOST_FRONTMATTER_KEY]);
 
 export function isReservedFrontmatterKey(key: string): boolean {
 	return RESERVED_FRONTMATTER_KEYS.has(key) || key.startsWith("x-");
@@ -145,10 +147,18 @@ export function parseWorkflowDefinition(
 	// validation see the same cleaned record. (Reserved keys can never be
 	// allowlisted, so the detection markers type/version/schemaVersion are
 	// also safe by vocabulary — the ordering makes it hold by construction.)
-	const data = foldNameKey(
-		partitionAllowedFrontmatter(input, allowedFrontmatterKeys).workflow,
-		nameSourceKey
+	// `host` is the fork's key and is not part of either upstream schema, so it
+	// is taken out before format detection and validation, like the name key,
+	// and carried on the definition. A bad value is an error: the workflow is
+	// invalid and runs nowhere, never everywhere.
+	const { record: withoutHost, host: hostValue } = takeHostKey(
+		partitionAllowedFrontmatter(input, allowedFrontmatterKeys).workflow
 	);
+	const parsedHost = parseHostValue(hostValue);
+	if (parsedHost.error) {
+		diagnostics.push({ severity: "error", path: HOST_FRONTMATTER_KEY, message: parsedHost.error });
+	}
+	const data = foldNameKey(withoutHost, nameSourceKey);
 	const sourceFormat = detectWorkflowSourceFormat(data);
 
 	if (sourceFormat === "runtime-v0.2") {
@@ -227,6 +237,7 @@ export function parseWorkflowDefinition(
 					name,
 					description: optionalString(normalizedData.description),
 					enabled,
+					...(parsedHost.host ? { host: parsedHost.host } : {}),
 					requires: parseRequires(normalizedData.requires, diagnostics),
 					triggers,
 					vars,
@@ -258,9 +269,9 @@ export function workflowToFrontmatter(
 	// The runtime record is built, and validated, with the canonical `name`;
 	// the rename happens afterwards so the schema check never sees the vault's
 	// key.
-	const record: Record<string, unknown> = renameNameKey(
-		workflowToRuntimeRecord(workflow),
-		normalizeNameKey(options.nameKey)
+	const record: Record<string, unknown> = withHostKey(
+		renameNameKey(workflowToRuntimeRecord(workflow), normalizeNameKey(options.nameKey)),
+		workflow.host
 	);
 	// Collisions are structurally impossible when `preservedFrontmatter` comes
 	// from pickAllowedFrontmatter: the runtime record only emits reserved keys
@@ -302,6 +313,37 @@ function partitionAllowedFrontmatter(
 		}
 	}
 	return { workflow, preserved };
+}
+
+/** Splits the `host` key off a parsed record, leaving the rest untouched. */
+function takeHostKey(data: Record<string, unknown>): { record: Record<string, unknown>; host: unknown } {
+	if (!Object.prototype.hasOwnProperty.call(data, HOST_FRONTMATTER_KEY)) return { record: data, host: undefined };
+	const record: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(data)) {
+		if (key !== HOST_FRONTMATTER_KEY) record[key] = value;
+	}
+	return { record, host: data[HOST_FRONTMATTER_KEY] };
+}
+
+/**
+ * Inverse of {@link takeHostKey} for the write paths: puts `host` back right
+ * after `enabled`, after the runtime record has been built and validated, so
+ * the upstream schema check never sees it.
+ */
+function withHostKey(record: Record<string, unknown>, host: string | undefined): Record<string, unknown> {
+	if (!host) return record;
+	const out: Record<string, unknown> = {};
+	let placed = false;
+	for (const [key, value] of Object.entries(record)) {
+		if (key === HOST_FRONTMATTER_KEY) continue;
+		out[key] = value;
+		if (key === "enabled") {
+			out[HOST_FRONTMATTER_KEY] = host;
+			placed = true;
+		}
+	}
+	if (!placed) out[HOST_FRONTMATTER_KEY] = host;
+	return out;
 }
 
 /**

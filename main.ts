@@ -3,6 +3,7 @@ import type { BasesViewRegistration } from "obsidian";
 import { DefaultWorkflowsService } from "./src/defaultWorkflowsService";
 import { RunLogService } from "./src/runLogService";
 import { PauseGate, PauseSkipLog } from "./src/pauseGate";
+import { HostNameStore, countNeedingMachineName, decideHost, hostBlockedMessage } from "./src/hostGate";
 import { WorkflowScheduler } from "./src/scheduler";
 import { DEFAULT_SETTINGS, normalizeSettings } from "./src/settings";
 import { WorkflowsSettingsTab } from "./src/settingsTab";
@@ -50,6 +51,7 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 	private defaults!: DefaultWorkflowsService;
 	private pauseGate!: PauseGate;
 	private readonly pauseSkips = new PauseSkipLog();
+	private hostNames!: HostNameStore;
 	private workflowMigrations!: WorkflowMigrationService;
 	private loadedWorkflows: LoadedWorkflow[] = [];
 	private workflowBaseViews = new Set<WorkflowBasesView>();
@@ -134,6 +136,7 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 		// One gate per plugin load, so its "pause note unreadable" warning is
 		// logged once rather than once per run.
 		this.pauseGate = new PauseGate(this.app, () => this.settings.pauseNotePath);
+		this.hostNames = new HostNameStore(this.app);
 		this.workflowMigrations = new WorkflowMigrationService(
 			this.app,
 			this.repository,
@@ -154,6 +157,7 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 			await this.defaults.ensureWorkflowViewFile();
 		}
 		await this.reloadWorkflows();
+		this.noticeMissingMachineName();
 		this.refreshTaskNotesRuntimeState();
 		this.registerInterval(
 			window.setInterval(() => {
@@ -189,6 +193,33 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 	async saveSettingsAndReload(): Promise<void> {
 		await this.saveSettings();
 		await this.reloadWorkflows();
+	}
+
+	/** This device's name, from per-device local storage (never synced). */
+	get machineName(): string {
+		return this.hostNames.get();
+	}
+
+	/** Sets this device's name; empty clears it. Re-renders the views that show it. */
+	async setMachineName(value: string): Promise<void> {
+		this.hostNames.set(value);
+		await this.renderWorkflowBaseViews();
+		refreshWorkflowNoteCards(this);
+	}
+
+	/**
+	 * One notice per plugin load when enabled workflows name a host and this
+	 * device has no name: they will not run here until it is set.
+	 */
+	private noticeMissingMachineName(): void {
+		const count = countNeedingMachineName(
+			this.loadedWorkflows.flatMap((loaded) => (loaded.workflow ? [loaded.workflow] : [])),
+			this.machineName
+		);
+		if (count === 0) return;
+		new Notice(
+			`TaskNotes Workflows: ${count} workflow${count === 1 ? "" : "s"} name a host and will not run on this device until you set its machine name in the plugin settings.`
+		);
 	}
 
 	async ensureDefaultWorkflows(): Promise<string[]> {
@@ -291,12 +322,24 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 	 * The single choke point every run passes through: scheduled, TaskNotes
 	 * event, Obsidian event, manual command, Bases card, runtime API and
 	 * interoperability action all reach the engine here. The fleet pause is
-	 * checked once, here, for that reason.
+	 * checked once, here, for that reason, and so is the workflow's `host`.
 	 */
 	private async executeWorkflow(
 		workflow: LoadedWorkflow,
 		options: WorkflowRunOptions
 	): Promise<WorkflowRunDetail> {
+		// The host check comes first and writes no run record: a workflow meant
+		// for another device would otherwise log a skipped run on every tick
+		// here, which is the run-log churn the July fix removed. A manual run
+		// gets a notice, so a click never fails silently.
+		if (workflow.workflow) {
+			const decision = decideHost(workflow.workflow.host, this.machineName);
+			if (!decision.allowed) {
+				const reason = hostBlockedMessage(decision);
+				if (options.manual) new Notice(reason);
+				return createSkippedRunDetail(workflow, options, reason);
+			}
+		}
 		const paused = workflow.workflow ? this.pauseGate.check() : { paused: false };
 		if (paused.paused) {
 			const reason = paused.reason ?? "paused";
