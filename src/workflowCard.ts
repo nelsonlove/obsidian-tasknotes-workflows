@@ -42,7 +42,11 @@ export function renderWorkflowCard(
 	if (workflow?.host) {
 		// Says where it runs, and whether that is here.
 		const here = decideHost(workflow.host, plugin.machineName).allowed;
-		renderChip(chips, `Runs only on ${workflow.host}`, here ? "host-here" : "host-elsewhere");
+		renderChip(
+			chips,
+			here ? `Runs only on ${workflow.host}` : `Runs only on ${workflow.host} (not here)`,
+			here ? "host-here" : "warning"
+		);
 	} else if (workflow?.enabled && workflow.triggers.some((trigger) => trigger.type === "cron" || trigger.type === "interval")) {
 		// A clock workflow with no host runs on every device that has the vault
 		// open, which makes one writer per device.

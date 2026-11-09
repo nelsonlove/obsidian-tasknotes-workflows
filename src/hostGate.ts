@@ -29,6 +29,8 @@ export function normalizeHostName(value: unknown): string {
 
 export type HostDecision =
 	| { allowed: true }
+	// host and machine are the names as written (trimmed), for messages; the
+	// comparison itself ignores case.
 	| { allowed: false; reason: "unset" | "mismatch"; host: string; machine: string };
 
 /**
@@ -42,8 +44,9 @@ export function decideHost(workflowHost: string | undefined, machineName: string
 	const host = normalizeHostName(workflowHost);
 	if (host.length === 0) return { allowed: true };
 	const machine = normalizeHostName(machineName);
-	if (machine.length === 0) return { allowed: false, reason: "unset", host, machine };
-	if (machine !== host) return { allowed: false, reason: "mismatch", host, machine };
+	const shown = { host: (workflowHost ?? "").trim(), machine: machineName.trim() };
+	if (machine.length === 0) return { allowed: false, reason: "unset", ...shown };
+	if (machine !== host) return { allowed: false, reason: "mismatch", ...shown };
 	return { allowed: true };
 }
 
@@ -56,12 +59,16 @@ export function hostBlockedMessage(decision: Extract<HostDecision, { allowed: fa
 }
 
 /**
- * Validates a `host` value read from frontmatter. Absent is fine (no gate). A
- * present value must be a non-empty string: anything else is an error, so the
+ * Validates a `host` value read from frontmatter. An absent key is fine (no
+ * gate); `undefined` means absent, and a present key with no value arrives as
+ * `null`. A present value must be a non-empty string: anything else is an error, so the
  * workflow is invalid and runs nowhere rather than everywhere.
  */
 export function parseHostValue(value: unknown): { host?: string; error?: string } {
-	if (value === undefined || value === null) return {};
+	if (value === undefined) return {};
+	// `host:` with no value (YAML null) is what clearing the property writes.
+	// It is a present key, so it fails closed like an empty string.
+	if (value === null) return { error: "host must not be empty; remove the key to run on every device." };
 	if (typeof value !== "string") {
 		return { error: "host must be a single machine name (a string)." };
 	}
@@ -72,20 +79,26 @@ export function parseHostValue(value: unknown): { host?: string; error?: string 
 
 /** Reads and writes this device's name in Obsidian's per-device local storage. */
 export class HostNameStore {
+	/** Read once and kept: the value changes only through {@link set}. */
+	private cached: string | null = null;
+
 	constructor(private readonly app: App) {}
 
 	get(): string {
+		if (this.cached !== null) return this.cached;
 		try {
 			const value: unknown = this.app.loadLocalStorage(HOST_NAME_STORAGE_KEY);
-			return typeof value === "string" ? value.trim() : "";
+			this.cached = typeof value === "string" ? value.trim() : "";
 		} catch {
-			return "";
+			this.cached = "";
 		}
+		return this.cached;
 	}
 
 	set(value: string): void {
 		const name = value.trim();
 		this.app.saveLocalStorage(HOST_NAME_STORAGE_KEY, name.length > 0 ? name : null);
+		this.cached = name;
 	}
 }
 

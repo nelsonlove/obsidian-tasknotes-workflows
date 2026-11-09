@@ -140,6 +140,12 @@ describe("executeWorkflow and the host key", () => {
 		expect(h.recordRun).not.toHaveBeenCalled();
 	});
 
+	it("lets a dry run preview a hosted workflow on another device", async () => {
+		const h = harness("desktop", "laptop");
+		await h.execute({ dryRun: true });
+		expect(h.runWorkflow).toHaveBeenCalledTimes(1);
+	});
+
 	it("runs a workflow with no host on any device, named or not", async () => {
 		for (const machine of ["", "desktop"]) {
 			const h = harness(machine, undefined);

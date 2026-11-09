@@ -63,12 +63,11 @@ describe("decideHost", () => {
 describe("parseHostValue", () => {
 	it("accepts an absent key and a non-empty string", () => {
 		expect(parseHostValue(undefined)).toEqual({});
-		expect(parseHostValue(null)).toEqual({});
 		expect(parseHostValue(" laptop ")).toEqual({ host: "laptop" });
 	});
 
 	it("rejects anything that is not one non-empty name", () => {
-		for (const value of ["", "  ", 1, true, ["laptop"], { name: "laptop" }]) {
+		for (const value of [null, "", "  ", 1, true, ["laptop"], { name: "laptop" }]) {
 			expect(parseHostValue(value).error, JSON.stringify(value)).toBeDefined();
 		}
 	});

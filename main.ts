@@ -331,8 +331,9 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 		// The host check comes first and writes no run record: a workflow meant
 		// for another device would otherwise log a skipped run on every tick
 		// here, which is the run-log churn the July fix removed. A manual run
-		// gets a notice, so a click never fails silently.
-		if (workflow.workflow) {
+		// gets a notice, so a click never fails silently. A dry run writes
+		// nothing, so it may preview a hosted workflow on any device.
+		if (workflow.workflow && !options.dryRun) {
 			const decision = decideHost(workflow.workflow.host, this.machineName);
 			if (!decision.allowed) {
 				const reason = hostBlockedMessage(decision);
