@@ -33,7 +33,9 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        # npm 11 matches local development, which writes the lock file; only
+        # this install uses it, so the pinned testbed keeps the runner's npm.
+        run: npx --yes npm@11.20.0 ci
 
       - name: Lint
         run: npm run lint
@@ -76,10 +78,10 @@ jobs:
           const versions = JSON.parse(fs.readFileSync("versions.json", "utf8"));
 
           const failures = [];
-          const semverPattern = /^\d+\.\d+\.\d+$/u;
+          const semverPattern = /^\d+\.\d+\.\d+(-nl\.\d+)?$/u;
 
           if (!semverPattern.test(manifest.version)) {
-            failures.push(`manifest version must use x.y.z: ${manifest.version}`);
+            failures.push(`manifest version must use x.y.z or x.y.z-nl.N: ${manifest.version}`);
           }
 
           if (packageJson.version !== manifest.version) {
