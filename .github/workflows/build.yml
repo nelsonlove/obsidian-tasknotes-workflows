@@ -32,11 +32,10 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Use the same npm major as local development
-        run: npm install -g npm@11
-
       - name: Install dependencies
-        run: npm ci
+        # npm 11 matches local development, which writes the lock file; only
+        # this install uses it, so the pinned testbed keeps the runner's npm.
+        run: npx --yes npm@11 ci
 
       - name: Lint
         run: npm run lint
