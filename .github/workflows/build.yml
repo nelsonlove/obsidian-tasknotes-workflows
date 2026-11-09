@@ -35,7 +35,7 @@ jobs:
       - name: Install dependencies
         # npm 11 matches local development, which writes the lock file; only
         # this install uses it, so the pinned testbed keeps the runner's npm.
-        run: npx --yes npm@11 ci
+        run: npx --yes npm@11.20.0 ci
 
       - name: Lint
         run: npm run lint
