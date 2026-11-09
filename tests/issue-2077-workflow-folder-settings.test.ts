@@ -237,6 +237,7 @@ describe("issue #2077 - workflow folder setting input", () => {
 					"Frontmatter",
 					"settings.triggers.heading",
 					"Fleet pause",
+					"Machine",
 					"settings.runLogs.heading",
 					"settings.language.heading",
 				],
@@ -312,6 +313,9 @@ function mockPlugin(): MockPlugin {
 		ensureDefaultFiles: vi.fn(async () => ({ workflows: [], view: null })),
 		showDefaultFilesNotice: vi.fn(),
 		clearRunHistory: vi.fn(async () => {}),
+		workflows: [],
+		machineName: "",
+		setMachineName: vi.fn(async () => {}),
 	};
 }
 
@@ -330,4 +334,7 @@ type MockPlugin = {
 	ensureDefaultFiles: ReturnType<typeof vi.fn>;
 	showDefaultFilesNotice: ReturnType<typeof vi.fn>;
 	clearRunHistory: ReturnType<typeof vi.fn>;
+	workflows: unknown[];
+	machineName: string;
+	setMachineName: ReturnType<typeof vi.fn>;
 };

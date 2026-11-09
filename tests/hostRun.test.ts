@@ -4,6 +4,33 @@ import TaskNotesWorkflowsPlugin from "../main";
 import { HostNameStore } from "../src/hostGate";
 import type { LoadedWorkflow, WorkflowRunOptions } from "../src/types";
 
+// Importing the plugin loads its whole module graph, and some modules extend
+// Obsidian classes at load time. The shared mock has only what the unit tests
+// use, so the classes those modules extend are stubbed here for this file.
+vi.mock("obsidian", async (importOriginal) => {
+	const actual = await importOriginal<Record<string, unknown>>();
+	class Stub {}
+	return {
+		...actual,
+		AbstractInputSuggest: Stub,
+		Component: Stub,
+		FileSystemAdapter: Stub,
+		MarkdownView: Stub,
+		Modal: Stub,
+		PluginSettingTab: Stub,
+		Setting: Stub,
+		WorkspaceLeaf: Stub,
+		editorInfoField: {},
+		setIcon: () => undefined,
+	};
+});
+// The edit modal's expression builder imports the real "obsidian" package,
+// which the alias does not reach inside node_modules.
+vi.mock("obsidian-bases-expression-builder", () => ({
+	collectObsidianBasesSchema: () => undefined,
+	openBasesExpressionBuilder: () => undefined,
+}));
+
 /**
  * Drives the plugin's single run choke point with its collaborators replaced
  * by spies, so the test checks the real order: host first, no run record and
@@ -26,6 +53,8 @@ function harness(machineName: string, host: string | undefined) {
 	}));
 	const pauseCheck = vi.fn(() => ({ paused: false }));
 	Object.assign(plugin, {
+		// After a run the plugin refreshes open workflow cards; no leaves here.
+		app: { ...app, workspace: { getLeavesOfType: () => [] } },
 		hostNames: names,
 		pauseGate: { check: pauseCheck },
 		pauseSkips: { shouldRecord: () => true, markRecorded: () => undefined, clear: () => undefined },
