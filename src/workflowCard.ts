@@ -3,6 +3,7 @@ import type TaskNotesWorkflowsPlugin from "../main";
 import type { LoadedWorkflow, WorkflowStep, WorkflowTrigger } from "./types";
 import { RunHistoryModal } from "./runHistoryModal";
 import { loadedWorkflowStatus } from "./workflowParser";
+import { decideHost } from "./hostGate";
 import { WorkflowEditModal } from "./workflowEditModal";
 
 export interface WorkflowCardOptions {
@@ -37,6 +38,19 @@ export function renderWorkflowCard(
 	}
 	if (workflow?.run.concurrency.policy !== "allow") {
 		renderChip(chips, plugin.t("workflowCard.labels.noOverlap"));
+	}
+	if (workflow?.host) {
+		// Says where it runs, and whether that is here.
+		const here = decideHost(workflow.host, plugin.machineName).allowed;
+		renderChip(
+			chips,
+			here ? `Runs only on ${workflow.host}` : `Runs only on ${workflow.host} (not here)`,
+			here ? "host-here" : "warning"
+		);
+	} else if (workflow?.enabled && workflow.triggers.some((trigger) => trigger.type === "cron" || trigger.type === "interval")) {
+		// A clock workflow with no host runs on every device that has the vault
+		// open, which makes one writer per device.
+		renderChip(chips, "Runs on every device", "host-every");
 	}
 
 	if (workflow?.description && !options.compact) {

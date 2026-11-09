@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Added a workflow-level `host` key and a "This machine's name" setting under a new **Machine** heading. A workflow note with `host: <name>` runs only on the device whose name matches (case and edge spaces are ignored), so a clock-triggered workflow that rewrites a shared note has one writer when the vault is open on several devices through a sync service. The device's name is kept in Obsidian's per-device local storage for the vault, not in `data.json`, so sync does not copy it. The gate fails closed: a workflow with `host` set does not run on a device whose name is empty, and the plugin shows one notice at load naming how many workflows wait on it. A dry run is not blocked, since it writes nothing. A blocked run writes no run record (a skipped record on every tick would flush real history out through retention); a manual run shows a notice instead. A `host` value that is not one non-empty name (an empty `host:` included) makes the workflow invalid, so it runs nowhere rather than everywhere. A workflow without the key runs on every device, as before; its card says "Runs on every device" when a clock triggers it. `host` is a workflow-owned key: it cannot be allowlisted or used as the name key, and every rewrite keeps it, right after `enabled`. `minAppVersion` is now 1.8.7, the first version with the per-device storage API.
+
 ### Fixed
 
 - A `shell.run` step whose command exits non-zero now fails the step, so with `onError: stop` the run is recorded as failed instead of "success". The run's error names the exit code and the last stderr line, and the failed step keeps `stdout`, `stderr`, `exitCode` and `ok` as its output, so with `onError: continue` later steps still run and can still read `steps.<id>.output.exitCode`. In a `forEach`, a non-zero exit now stops the remaining items, as any failing step does.

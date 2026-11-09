@@ -35,6 +35,7 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 					"Frontmatter",
 					this.workflowsPlugin.t("settings.triggers.heading"),
 					"Fleet pause",
+					"Machine",
 					this.workflowsPlugin.t("settings.runLogs.heading"),
 					this.workflowsPlugin.t("settings.language.heading"),
 				],
@@ -209,6 +210,30 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 				text.setValue(this.workflowsPlugin.settings.pauseNotePath);
 				this.commitTextOnFinish(text, (value) => {
 					this.updatePauseNotePath(value);
+				});
+			});
+
+		new Setting(containerEl).setName("Machine").setHeading();
+
+		const hosted = this.workflowsPlugin.workflows
+			.flatMap((loaded) => (loaded.workflow?.host ? [loaded.workflow.host] : []));
+		const hostedSummary = hosted.length === 0
+			? "No workflow names a host yet."
+			: `Workflows naming a host: ${[...new Set(hosted)].join(", ")} (${hosted.length}).`;
+		new Setting(containerEl)
+			.setName("This machine's name")
+			.setDesc(
+				`A workflow whose frontmatter has \`host: <name>\` runs only on the device with that name (case is ignored). A workflow with \`host\` set does not run on a device whose name is empty. The name is kept in this device's local storage for this vault, not in the plugin's settings file, so a sync service does not copy it to your other devices. ${hostedSummary}`
+			)
+			.addText((text) => {
+				text.setPlaceholder("Laptop");
+				text.setValue(this.workflowsPlugin.machineName);
+				this.commitTextOnFinish(text, (value) => {
+					if (value.trim() === this.workflowsPlugin.machineName) return;
+					void this.workflowsPlugin.setMachineName(value).then(() => {
+						const name = value.trim();
+						new Notice(name ? `This machine's name is now "${name}".` : "This machine's name is cleared.");
+					});
 				});
 			});
 
@@ -396,3 +421,4 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 		});
 	}
 }
+

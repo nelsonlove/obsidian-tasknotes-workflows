@@ -56,6 +56,11 @@ export interface WorkflowDefinition {
 	id: string;
 	name: string;
 	enabled: boolean;
+	/**
+	 * Machine name this workflow is limited to (the `host` frontmatter key).
+	 * Unset: it runs on every device. See src/hostGate.ts.
+	 */
+	host?: string;
 	description?: string;
 	requires?: WorkflowRequires;
 	triggers: WorkflowTrigger[];
