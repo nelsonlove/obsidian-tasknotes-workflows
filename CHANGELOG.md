@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- A `shell.run` step whose command exits non-zero now fails the step, so with `onError: stop` the run is recorded as failed instead of "success". The run's error names the exit code and the last stderr line, and the failed step keeps `stdout`, `stderr`, `exitCode` and `ok` as its output, so with `onError: continue` later steps still run and can still read `steps.<id>.output.exitCode`. In a `forEach`, a non-zero exit now stops the remaining items, as any failing step does.
+
 ## [0.1.4-nl.4] - 2026-09-22
 
 Fork release (nl line). Not an upstream release.
