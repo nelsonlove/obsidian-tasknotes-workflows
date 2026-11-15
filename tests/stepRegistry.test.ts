@@ -118,7 +118,7 @@ describe("shell.run step", () => {
 	it("registers with command/cwd/timeout inputs and stdout/stderr/exit/ok outputs", () => {
 		const step = new StepRegistry().get("shell.run");
 		expect(step?.category).toBe("Obsidian");
-		expect(step?.inputFields.map((field) => field.key)).toEqual(["command", "cwd", "timeoutMs"]);
+		expect(step?.inputFields.map((field) => field.key)).toEqual(["command", "cwd", "timeoutMs", "allowFailure"]);
 		expect(step?.outputFields.map((field) => field.key)).toEqual(["stdout", "stderr", "exitCode", "ok"]);
 		expect(step?.writesVault).toBe(false);
 	});

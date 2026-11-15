@@ -20,8 +20,8 @@ function fakeExecFile(file: string, args: readonly string[], _options: unknown, 
 	callback(null, `${command.replace(/^echo /, "")}\n`, "");
 }
 
-function shellStep(id: string, command: string): WorkflowStep {
-	return { id, type: "shell.run", input: { command } };
+function shellStep(id: string, command: string, extra: Record<string, unknown> = {}): WorkflowStep {
+	return { id, type: "shell.run", input: { command, ...extra } };
 }
 
 function workflow(steps: WorkflowStep[], onError: "stop" | "continue" = "stop"): LoadedWorkflow {
@@ -52,6 +52,13 @@ function workflow(steps: WorkflowStep[], onError: "stop" | "continue" = "stop"):
 	};
 }
 
+/** A fake window whose `require` hands out the given execFile. */
+function fakeWindow(execFile: unknown) {
+	return {
+		require: (id: string) => (id === "child_process" ? { execFile } : undefined),
+	};
+}
+
 async function run(loaded: LoadedWorkflow) {
 	const engine = new WorkflowEngine(new StepRegistry(), () => null);
 	return engine.runWorkflow(loaded, { trigger: { type: "manual", event: "manual" } });
@@ -64,7 +71,7 @@ describe("shell.run exit status decides the run status", () => {
 	beforeEach(() => {
 		setCodeStepPolicy({ enabled: true });
 		originalWindow = holder.window;
-		holder.window = { require: (id: string) => (id === "child_process" ? { execFile: fakeExecFile } : undefined) };
+		holder.window = fakeWindow(fakeExecFile);
 	});
 
 	afterEach(() => {
@@ -133,18 +140,101 @@ describe("shell.run exit status decides the run status", () => {
 
 	it("puts only the last stderr line in the run error, without a carriage return", async () => {
 		const holderWindow = globalThis as { window?: unknown };
-		holderWindow.window = {
-			require: (id: string) =>
-				id === "child_process"
-					? {
-							execFile: (_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
-								callback(Object.assign(new Error("failed"), { code: 4 }), "", "line one\r\nline two\r\n"),
-						}
-					: undefined,
-		};
+		holderWindow.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
+								callback(Object.assign(new Error("failed"), { code: 4 }), "", "line one\r\nline two\r\n"));
 		const result = await run(workflow([shellStep("probe", "anything")]));
 
 		expect(result.status).toBe("failed");
 		expect(result.error).toBe("shell.run exited with code 4: line two");
+	});
+	it("with allowFailure, a non-zero exit succeeds with ok: false and the run goes on", async () => {
+		const result = await run(
+			workflow([
+				shellStep("probe", "exit 3", { allowFailure: true }),
+				shellStep("next", "echo code={{steps.probe.output.exitCode}} ok={{steps.probe.output.ok}}"),
+			])
+		);
+
+		expect(result.status).toBe("success");
+		expect(result.steps.map((step) => [step.id, step.status])).toEqual([
+			["probe", "success"],
+			["next", "success"],
+		]);
+		expect(result.steps[0]?.output).toEqual({ stdout: "", stderr: "failed with 3\n", exitCode: 3, ok: false });
+		expect(result.steps[0]?.errorCode).toBeUndefined();
+		expect(result.steps[1]?.output).toEqual(expect.objectContaining({ stdout: "code=3 ok=false\n" }));
+	});
+
+	it("reads only the boolean true as allowFailure, as the editor checkbox does", async () => {
+		const result = await run(workflow([shellStep("probe", "exit 1", { allowFailure: "true" })]));
+
+		expect(result.status).toBe("failed");
+		expect(result.steps[0]?.errorCode).toBe("shell_nonzero_exit");
+	});
+
+	it("still fails on a non-zero exit when allowFailure is false", async () => {
+		const result = await run(workflow([shellStep("probe", "exit 1", { allowFailure: false })]));
+
+		expect(result.status).toBe("failed");
+		expect(result.steps[0]?.errorCode).toBe("shell_nonzero_exit");
+	});
+
+	it("still fails on a timeout, with or without allowFailure", async () => {
+		// execFile's own timeout killed the shell.
+		holder.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
+			callback(Object.assign(new Error("killed"), { killed: true, signal: "SIGTERM", code: null }), "partial", "")
+		);
+		for (const extra of [{}, { allowFailure: true }]) {
+			const result = await run(workflow([shellStep("probe", "sleep 9", { timeoutMs: 50, ...extra })]));
+
+			expect(result.status).toBe("failed");
+			expect(result.error).toBe("shell.run timed out after 50ms");
+			expect(result.steps[0]?.status).toBe("failed");
+		}
+	});
+
+	it("still fails on a timeout when the killed shell reports a numeric exit code (a SIGTERM trap), keeping it", async () => {
+		// execFile's own timeout killed the shell.
+		holder.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
+			callback(Object.assign(new Error("killed"), { killed: true, signal: null, code: 1 }), "", "")
+		);
+		for (const extra of [{}, { allowFailure: true }]) {
+			const result = await run(workflow([shellStep("probe", "sleep 9", { timeoutMs: 50, ...extra })]));
+
+			expect(result.status).toBe("failed");
+			expect(result.error).toBe("shell.run timed out after 50ms");
+			expect(result.steps[0]?.status).toBe("failed");
+			expect(result.steps[0]).toEqual(
+				expect.objectContaining({
+					errorCode: "shell_timeout",
+					output: { stdout: "", stderr: "", exitCode: 1, ok: false },
+				})
+			);
+		}
+	});
+
+	it("fails on a signal that kills the command, with or without allowFailure, keeping partial output", async () => {
+		holder.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
+								callback(
+									Object.assign(new Error("Command failed: /bin/zsh -lc long command text"), {
+										killed: false,
+										signal: "SIGSEGV",
+										code: null,
+									}),
+									"half\n",
+									"boom\n"
+								));
+		for (const extra of [{}, { allowFailure: true }]) {
+			const result = await run(workflow([shellStep("probe", "bin/tool", extra)]));
+
+			expect(result.status).toBe("failed");
+			expect(result.error).toBe("shell.run was killed by SIGSEGV: boom");
+			expect(result.steps[0]).toEqual(
+				expect.objectContaining({
+					errorCode: "shell_signal",
+					output: { stdout: "half\n", stderr: "boom\n", exitCode: null, ok: false },
+				})
+			);
+		}
 	});
 });

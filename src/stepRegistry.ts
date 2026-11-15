@@ -793,7 +793,7 @@ function createDefaultSteps(): StepDefinition[] {
 			type: "shell.run",
 			label: "Run shell command",
 			description:
-				'Run a shell command through a login shell (desktop only); awaits it and returns stdout, stderr, and the exit code. A non-zero exit fails the step. Requires "Allow code steps" in settings.',
+				'Run a shell command through a login shell (desktop only); awaits it and returns stdout, stderr, and the exit code. A non-zero exit fails the step unless "Allow failure" is set. Requires "Allow code steps" in settings.',
 			category: "Obsidian",
 			inputFields: [
 				{
@@ -812,6 +812,14 @@ function createDefaultSteps(): StepDefinition[] {
 					placeholder: "Absolute, or vault-relative; defaults to the vault root.",
 				},
 				{ key: "timeoutMs", label: "Timeout (ms)", type: "number", defaultValue: 120_000 },
+				{
+					key: "allowFailure",
+					label: "Allow failure",
+					type: "boolean",
+					defaultValue: false,
+					description:
+						"When on, a non-zero exit does not fail the step: it succeeds with ok: false, and later steps read the exit code. A timeout, or a signal that kills the shell, still fails the step; only the shell's own exit status counts.",
+				},
 			],
 			outputFields: [
 				{ key: "stdout", label: "stdout", type: "string" },
@@ -848,7 +856,7 @@ function createDefaultSteps(): StepDefinition[] {
 				if (typeof nodeRequire !== "function") {
 					throw new Error("shell.run requires desktop Obsidian (Node is unavailable on mobile).");
 				}
-				type ExecFileError = Error & { code?: number | string; killed?: boolean };
+				type ExecFileError = Error & { code?: number | string; killed?: boolean; signal?: string | null };
 				type ExecFileFn = (
 					file: string,
 					args: readonly string[],
@@ -868,7 +876,12 @@ function createDefaultSteps(): StepDefinition[] {
 					cwd = `${base}/${cwdRaw}`;
 				}
 				const timeoutRaw = record.timeoutMs;
-				const timeout = typeof timeoutRaw === "number" && timeoutRaw > 0 ? timeoutRaw : 120_000;
+				// execFile takes a whole number of ms up to 2^31 - 1.
+				const timeout =
+					typeof timeoutRaw === "number" && timeoutRaw > 0 ? Math.min(Math.ceil(timeoutRaw), 2_147_483_647) : 120_000;
+				const allowFailure = record.allowFailure === true;
+
+				const tail = (text: string) => text.trim().split(/\r?\n/).slice(-1)[0]?.trim().slice(0, 500);
 
 				return await new Promise((resolve, reject) => {
 					childProcess.execFile(
@@ -876,25 +889,50 @@ function createDefaultSteps(): StepDefinition[] {
 						["-lc", command],
 						{ cwd, timeout, maxBuffer: 16 * 1024 * 1024, encoding: "utf8" },
 						(error, stdout, stderr) => {
-							if (error && typeof error.code !== "number") {
+							const io = { stdout: stdout ?? "", stderr: stderr ?? "" };
+							const partial = {
+								...io,
+								exitCode: typeof error?.code === "number" ? error.code : null,
+								ok: false,
+							};
+							const stderrTail = tail(partial.stderr);
+							// A timeout or a signal fails the step whatever allowFailure says, and
+							// keeps the partial stdout/stderr as the step's output. Test killed
+							// first: a shell that traps the kill can still report a numeric exit
+							// code, and allowFailure must not pass a timeout.
+							if (error?.killed) {
 								reject(
-									new Error(
-										error.killed ? `shell.run timed out after ${timeout}ms` : error.message
+									new StepFailure(`shell.run timed out after ${timeout}ms`, {
+										code: "shell_timeout",
+										details: { timeoutMs: timeout },
+										output: partial,
+									})
+								);
+								return;
+							}
+							if (error && typeof error.signal === "string" && error.signal) {
+								reject(
+									new StepFailure(
+										`shell.run was killed by ${error.signal}${stderrTail ? `: ${stderrTail}` : ""}`,
+										{ code: "shell_signal", details: { signal: error.signal }, output: partial }
 									)
 								);
 								return;
 							}
+							if (error && typeof error.code !== "number") {
+								reject(new Error(error.message));
+								return;
+							}
 							const exitCode = error ? (error.code as number) : 0;
 							const result = {
-								stdout: stdout ?? "",
-								stderr: stderr ?? "",
+								...io,
 								exitCode,
 								ok: exitCode === 0,
 							};
-							if (exitCode !== 0) {
+							if (exitCode !== 0 && !allowFailure) {
 								// A non-zero exit fails the step (and, with onError: stop, the run),
-								// keeping stdout/stderr/exitCode in the step record.
-								const stderrTail = result.stderr.trim().split(/\r?\n/).slice(-1)[0]?.trim().slice(0, 500);
+								// keeping stdout/stderr/exitCode in the step record. With allowFailure
+								// the step resolves with ok: false instead.
 								reject(
 									new StepFailure(
 										`shell.run exited with code ${exitCode}${stderrTail ? `: ${stderrTail}` : ""}`,
