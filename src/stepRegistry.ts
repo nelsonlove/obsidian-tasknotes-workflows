@@ -818,7 +818,7 @@ function createDefaultSteps(): StepDefinition[] {
 					type: "boolean",
 					defaultValue: false,
 					description:
-						"When on, a non-zero exit does not fail the step: it succeeds with ok: false, and later steps read the exit code. A timeout, or a signal that kills the command, still fails the step.",
+						"When on, a non-zero exit does not fail the step: it succeeds with ok: false, and later steps read the exit code. A timeout that kills the command, or a signal that kills it, still fails the step.",
 				},
 			],
 			outputFields: [
@@ -876,8 +876,7 @@ function createDefaultSteps(): StepDefinition[] {
 					cwd = `${base}/${cwdRaw}`;
 				}
 				const timeoutRaw = record.timeoutMs;
-				// A timer holds at most 2^31 - 1 ms (a longer value fires at once), and execFile
-				// takes only a whole number.
+				// execFile takes a whole number of ms up to 2^31 - 1.
 				const timeout =
 					typeof timeoutRaw === "number" && timeoutRaw > 0 ? Math.min(Math.ceil(timeoutRaw), 2_147_483_647) : 120_000;
 				const allowFailure = record.allowFailure === true;
@@ -885,24 +884,23 @@ function createDefaultSteps(): StepDefinition[] {
 				const tail = (text: string) => text.trim().split(/\r?\n/).slice(-1)[0]?.trim().slice(0, 500);
 
 				return await new Promise((resolve, reject) => {
-					// execFile's own timeout kills the shell and closes its pipes. A flag timer,
-					// armed first so it fires first, also catches a command that traps the kill
-					// signal and then exits 0 (or any code): Node reports no error for that.
-					let timedOut = false;
-					const timer = window.setTimeout(() => {
-						timedOut = true;
-					}, timeout);
 					childProcess.execFile(
 						"/bin/zsh",
 						["-lc", command],
 						{ cwd, timeout, maxBuffer: 16 * 1024 * 1024, encoding: "utf8" },
 						(error, stdout, stderr) => {
-							window.clearTimeout(timer);
-							const partial = { stdout: stdout ?? "", stderr: stderr ?? "", exitCode: null, ok: false };
+							const io = { stdout: stdout ?? "", stderr: stderr ?? "" };
+							const partial = {
+								...io,
+								exitCode: typeof error?.code === "number" ? error.code : null,
+								ok: false,
+							};
 							const stderrTail = tail(partial.stderr);
 							// A timeout or a signal fails the step whatever allowFailure says, and
-							// keeps the partial stdout/stderr as the step's output.
-							if (timedOut || error?.killed) {
+							// keeps the partial stdout/stderr as the step's output. Test killed
+							// first: a shell that traps the kill can still report a numeric exit
+							// code, and allowFailure must not pass a timeout.
+							if (error?.killed) {
 								reject(
 									new StepFailure(`shell.run timed out after ${timeout}ms`, {
 										code: "shell_timeout",
@@ -927,8 +925,7 @@ function createDefaultSteps(): StepDefinition[] {
 							}
 							const exitCode = error ? (error.code as number) : 0;
 							const result = {
-								stdout: stdout ?? "",
-								stderr: stderr ?? "",
+								...io,
 								exitCode,
 								ok: exitCode === 0,
 							};

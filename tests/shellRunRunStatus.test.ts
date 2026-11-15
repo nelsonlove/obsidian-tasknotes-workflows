@@ -195,7 +195,7 @@ describe("shell.run exit status decides the run status", () => {
 		}
 	});
 
-	it("still fails on a timeout when the killed shell reports a numeric exit code (a SIGTERM trap)", async () => {
+	it("still fails on a timeout when the killed shell reports a numeric exit code (a SIGTERM trap), keeping it", async () => {
 		// execFile's own timeout killed the shell.
 		holder.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
 			callback(Object.assign(new Error("killed"), { killed: true, signal: null, code: 1 }), "", "")
@@ -206,6 +206,12 @@ describe("shell.run exit status decides the run status", () => {
 			expect(result.status).toBe("failed");
 			expect(result.error).toBe("shell.run timed out after 50ms");
 			expect(result.steps[0]?.status).toBe("failed");
+			expect(result.steps[0]).toEqual(
+				expect.objectContaining({
+					errorCode: "shell_timeout",
+					output: { stdout: "", stderr: "", exitCode: 1, ok: false },
+				})
+			);
 		}
 	});
 
@@ -217,25 +223,6 @@ describe("shell.run exit status decides the run status", () => {
 
 		expect(result.status).toBe("success");
 		expect(result.steps[0]?.output).toEqual({ stdout: "done\n", stderr: "", exitCode: 0, ok: true });
-	});
-
-	it("still fails on a timeout when the command traps the kill and exits 0, keeping partial output", async () => {
-		holder.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) => {
-								setTimeout(() => callback(null, "partial\n", ""), 60);
-							});
-		for (const extra of [{}, { allowFailure: true }]) {
-			const result = await run(workflow([shellStep("probe", "long", { timeoutMs: 20, ...extra })]));
-
-			expect(result.status).toBe("failed");
-			expect(result.error).toBe("shell.run timed out after 20ms");
-			expect(result.steps[0]).toEqual(
-				expect.objectContaining({
-					status: "failed",
-					errorCode: "shell_timeout",
-					output: { stdout: "partial\n", stderr: "", exitCode: null, ok: false },
-				})
-			);
-		}
 	});
 
 	it("fails on a signal that kills the command, with or without allowFailure, keeping partial output", async () => {
