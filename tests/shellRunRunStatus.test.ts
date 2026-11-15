@@ -216,4 +216,61 @@ describe("shell.run exit status decides the run status", () => {
 			expect(result.steps[0]?.status).toBe("failed");
 		}
 	});
+	it("still fails on a timeout when the command traps the kill and exits 0, keeping partial output", async () => {
+		holder.window = {
+			require: (id: string) =>
+				id === "child_process"
+					? {
+							execFile: (_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) => {
+								setTimeout(() => callback(null, "partial\n", ""), 60);
+							},
+						}
+					: undefined,
+		};
+		for (const extra of [{}, { allowFailure: true }]) {
+			const result = await run(workflow([shellStep("probe", "long", { timeoutMs: 20, ...extra })]));
+
+			expect(result.status).toBe("failed");
+			expect(result.error).toBe("shell.run timed out after 20ms");
+			expect(result.steps[0]).toEqual(
+				expect.objectContaining({
+					status: "failed",
+					errorCode: "shell_timeout",
+					output: { stdout: "partial\n", stderr: "", exitCode: null, ok: false },
+				})
+			);
+		}
+	});
+
+	it("fails on a signal that kills the command, with or without allowFailure, keeping partial output", async () => {
+		holder.window = {
+			require: (id: string) =>
+				id === "child_process"
+					? {
+							execFile: (_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
+								callback(
+									Object.assign(new Error("Command failed: /bin/zsh -lc long command text"), {
+										killed: false,
+										signal: "SIGSEGV",
+										code: null,
+									}),
+									"half\n",
+									"boom\n"
+								),
+						}
+					: undefined,
+		};
+		for (const extra of [{}, { allowFailure: true }]) {
+			const result = await run(workflow([shellStep("probe", "bin/tool", extra)]));
+
+			expect(result.status).toBe("failed");
+			expect(result.error).toBe("shell.run was killed by SIGSEGV: boom");
+			expect(result.steps[0]).toEqual(
+				expect.objectContaining({
+					errorCode: "shell_signal",
+					output: { stdout: "half\n", stderr: "boom\n", exitCode: null, ok: false },
+				})
+			);
+		}
+	});
 });
