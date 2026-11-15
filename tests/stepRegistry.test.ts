@@ -109,7 +109,11 @@ describe("shell.run step", () => {
 		// Stubbing the desktop `window.require` in a Node test.
 		const holder = globalThis as { window?: unknown };
 		const original = holder.window;
-		holder.window = { require: (id: string) => (id === "child_process" ? { execFile } : undefined) };
+		holder.window = {
+			setTimeout: globalThis.setTimeout.bind(globalThis),
+			clearTimeout: globalThis.clearTimeout.bind(globalThis),
+			require: (id: string) => (id === "child_process" ? { execFile } : undefined),
+		};
 		return fn().finally(() => {
 			holder.window = original;
 		});

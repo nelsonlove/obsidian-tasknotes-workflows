@@ -52,6 +52,15 @@ function workflow(steps: WorkflowStep[], onError: "stop" | "continue" = "stop"):
 	};
 }
 
+/** A fake window: the real timers, and `require` handing out the given execFile. */
+function fakeWindow(execFile: unknown) {
+	return {
+		setTimeout: globalThis.setTimeout.bind(globalThis),
+		clearTimeout: globalThis.clearTimeout.bind(globalThis),
+		require: (id: string) => (id === "child_process" ? { execFile } : undefined),
+	};
+}
+
 async function run(loaded: LoadedWorkflow) {
 	const engine = new WorkflowEngine(new StepRegistry(), () => null);
 	return engine.runWorkflow(loaded, { trigger: { type: "manual", event: "manual" } });
@@ -64,7 +73,7 @@ describe("shell.run exit status decides the run status", () => {
 	beforeEach(() => {
 		setCodeStepPolicy({ enabled: true });
 		originalWindow = holder.window;
-		holder.window = { require: (id: string) => (id === "child_process" ? { execFile: fakeExecFile } : undefined) };
+		holder.window = fakeWindow(fakeExecFile);
 	});
 
 	afterEach(() => {
@@ -133,15 +142,8 @@ describe("shell.run exit status decides the run status", () => {
 
 	it("puts only the last stderr line in the run error, without a carriage return", async () => {
 		const holderWindow = globalThis as { window?: unknown };
-		holderWindow.window = {
-			require: (id: string) =>
-				id === "child_process"
-					? {
-							execFile: (_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
-								callback(Object.assign(new Error("failed"), { code: 4 }), "", "line one\r\nline two\r\n"),
-						}
-					: undefined,
-		};
+		holderWindow.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
+								callback(Object.assign(new Error("failed"), { code: 4 }), "", "line one\r\nline two\r\n"));
 		const result = await run(workflow([shellStep("probe", "anything")]));
 
 		expect(result.status).toBe("failed");
@@ -180,15 +182,13 @@ describe("shell.run exit status decides the run status", () => {
 	});
 
 	it("still fails on a timeout, with or without allowFailure", async () => {
-		holder.window = {
-			require: (id: string) =>
-				id === "child_process"
-					? {
-							execFile: (_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
-								callback(Object.assign(new Error("killed"), { killed: true, signal: "SIGTERM", code: null }), "partial", ""),
-						}
-					: undefined,
-		};
+		// The command runs until the step's own timer kills it; the kill ends it as given.
+		holder.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) => ({
+			kill: () => {
+				setTimeout(() => callback(Object.assign(new Error("killed"), { killed: true, signal: "SIGTERM", code: null }), "partial", ""), 0);
+				return true;
+			},
+		}));
 		for (const extra of [{}, { allowFailure: true }]) {
 			const result = await run(workflow([shellStep("probe", "sleep 9", { timeoutMs: 50, ...extra })]));
 
@@ -199,15 +199,13 @@ describe("shell.run exit status decides the run status", () => {
 	});
 
 	it("still fails on a timeout when the killed shell reports a numeric exit code (a SIGTERM trap)", async () => {
-		holder.window = {
-			require: (id: string) =>
-				id === "child_process"
-					? {
-							execFile: (_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
-								callback(Object.assign(new Error("killed"), { killed: true, signal: null, code: 1 }), "", ""),
-						}
-					: undefined,
-		};
+		// The command runs until the step's own timer kills it; the kill ends it as given.
+		holder.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) => ({
+			kill: () => {
+				setTimeout(() => callback(Object.assign(new Error("killed"), { killed: true, signal: null, code: 1 }), "", ""), 0);
+				return true;
+			},
+		}));
 		for (const extra of [{}, { allowFailure: true }]) {
 			const result = await run(workflow([shellStep("probe", "sleep 9", { timeoutMs: 50, ...extra })]));
 
@@ -216,17 +214,22 @@ describe("shell.run exit status decides the run status", () => {
 			expect(result.steps[0]?.status).toBe("failed");
 		}
 	});
+
+	it("does not call a command that ends before the timeout a timeout, however late its callback", async () => {
+		holder.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) => {
+			callback(null, "done\n", "");
+		});
+		const result = await run(workflow([shellStep("probe", "quick", { timeoutMs: 5 })]));
+		await new Promise((resolve) => setTimeout(resolve, 20));
+
+		expect(result.status).toBe("success");
+		expect(result.steps[0]?.output).toEqual({ stdout: "done\n", stderr: "", exitCode: 0, ok: true });
+	});
+
 	it("still fails on a timeout when the command traps the kill and exits 0, keeping partial output", async () => {
-		holder.window = {
-			require: (id: string) =>
-				id === "child_process"
-					? {
-							execFile: (_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) => {
+		holder.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) => {
 								setTimeout(() => callback(null, "partial\n", ""), 60);
-							},
-						}
-					: undefined,
-		};
+							});
 		for (const extra of [{}, { allowFailure: true }]) {
 			const result = await run(workflow([shellStep("probe", "long", { timeoutMs: 20, ...extra })]));
 
@@ -243,11 +246,7 @@ describe("shell.run exit status decides the run status", () => {
 	});
 
 	it("fails on a signal that kills the command, with or without allowFailure, keeping partial output", async () => {
-		holder.window = {
-			require: (id: string) =>
-				id === "child_process"
-					? {
-							execFile: (_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
+		holder.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
 								callback(
 									Object.assign(new Error("Command failed: /bin/zsh -lc long command text"), {
 										killed: false,
@@ -256,10 +255,7 @@ describe("shell.run exit status decides the run status", () => {
 									}),
 									"half\n",
 									"boom\n"
-								),
-						}
-					: undefined,
-		};
+								));
 		for (const extra of [{}, { allowFailure: true }]) {
 			const result = await run(workflow([shellStep("probe", "bin/tool", extra)]));
 

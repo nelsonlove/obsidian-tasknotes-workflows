@@ -860,9 +860,9 @@ function createDefaultSteps(): StepDefinition[] {
 				type ExecFileFn = (
 					file: string,
 					args: readonly string[],
-					options: { cwd?: string; timeout?: number; maxBuffer?: number; encoding?: string },
+					options: { cwd?: string; maxBuffer?: number; encoding?: string },
 					callback: (error: ExecFileError | null, stdout: string, stderr: string) => void
-				) => void;
+				) => { kill?: (signal?: string) => boolean } | undefined;
 				const childProcess = nodeRequire("child_process") as { execFile: ExecFileFn };
 
 				const app = context.obsidian?.app;
@@ -876,26 +876,33 @@ function createDefaultSteps(): StepDefinition[] {
 					cwd = `${base}/${cwdRaw}`;
 				}
 				const timeoutRaw = record.timeoutMs;
-				const timeout = typeof timeoutRaw === "number" && timeoutRaw > 0 ? timeoutRaw : 120_000;
+				// A browser timer holds at most 2^31 - 1 ms; a longer value would fire at once.
+				const timeout =
+					typeof timeoutRaw === "number" && timeoutRaw > 0 ? Math.min(Math.round(timeoutRaw), 2_147_483_647) : 120_000;
 				const allowFailure = record.allowFailure === true;
 
 				const tail = (text: string) => text.trim().split(/\r?\n/).slice(-1)[0]?.trim().slice(0, 500);
 
 				return await new Promise((resolve, reject) => {
-					// The elapsed time decides a timeout too, so a command that traps the kill
-					// signal and then exits 0 (or any code) is still read as a timeout.
-					const started = Date.now();
-					childProcess.execFile(
+					// The plugin's own timer, not execFile's, decides a timeout: it sets a flag
+					// and kills the shell, so a command that traps the kill signal and then
+					// exits 0 (or any code) is still read as a timeout, and a slow callback
+					// (sleep, a busy event loop) is never mistaken for one.
+					let timedOut = false;
+					let settled = false;
+					let timer: number | undefined;
+					const child = childProcess.execFile(
 						"/bin/zsh",
 						["-lc", command],
-						{ cwd, timeout, maxBuffer: 16 * 1024 * 1024, encoding: "utf8" },
+						{ cwd, maxBuffer: 16 * 1024 * 1024, encoding: "utf8" },
 						(error, stdout, stderr) => {
-							const timedOut = Date.now() - started >= timeout;
+							settled = true;
+							if (timer !== undefined) window.clearTimeout(timer);
 							const partial = { stdout: stdout ?? "", stderr: stderr ?? "", exitCode: null, ok: false };
 							const stderrTail = tail(partial.stderr);
 							// A timeout or a signal fails the step whatever allowFailure says, and
 							// keeps the partial stdout/stderr as the step's output.
-							if (timedOut || error?.killed) {
+							if (timedOut) {
 								reject(
 									new StepFailure(`shell.run timed out after ${timeout}ms`, {
 										code: "shell_timeout",
@@ -940,6 +947,12 @@ function createDefaultSteps(): StepDefinition[] {
 							resolve(result);
 						}
 					);
+					if (!settled) {
+						timer = window.setTimeout(() => {
+							timedOut = true;
+							child?.kill?.("SIGTERM");
+						}, timeout);
+					}
 				});
 			},
 		},
