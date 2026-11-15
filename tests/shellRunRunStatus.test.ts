@@ -20,8 +20,8 @@ function fakeExecFile(file: string, args: readonly string[], _options: unknown, 
 	callback(null, `${command.replace(/^echo /, "")}\n`, "");
 }
 
-function shellStep(id: string, command: string): WorkflowStep {
-	return { id, type: "shell.run", input: { command } };
+function shellStep(id: string, command: string, extra: Record<string, unknown> = {}): WorkflowStep {
+	return { id, type: "shell.run", input: { command, ...extra } };
 }
 
 function workflow(steps: WorkflowStep[], onError: "stop" | "continue" = "stop"): LoadedWorkflow {
@@ -146,5 +146,55 @@ describe("shell.run exit status decides the run status", () => {
 
 		expect(result.status).toBe("failed");
 		expect(result.error).toBe("shell.run exited with code 4: line two");
+	});
+	it("with allowFailure, a non-zero exit succeeds with ok: false and the run goes on", async () => {
+		const result = await run(
+			workflow([
+				shellStep("probe", "exit 3", { allowFailure: true }),
+				shellStep("next", "echo code={{steps.probe.output.exitCode}} ok={{steps.probe.output.ok}}"),
+			])
+		);
+
+		expect(result.status).toBe("success");
+		expect(result.steps.map((step) => [step.id, step.status])).toEqual([
+			["probe", "success"],
+			["next", "success"],
+		]);
+		expect(result.steps[0]?.output).toEqual({ stdout: "", stderr: "failed with 3\n", exitCode: 3, ok: false });
+		expect(result.steps[0]?.errorCode).toBeUndefined();
+		expect(result.steps[1]?.output).toEqual(expect.objectContaining({ stdout: "code=3 ok=false\n" }));
+	});
+
+	it("reads allowFailure written as the string \"true\"", async () => {
+		const result = await run(workflow([shellStep("probe", "exit 1", { allowFailure: "true" })]));
+
+		expect(result.status).toBe("success");
+		expect(result.steps[0]?.output).toEqual(expect.objectContaining({ exitCode: 1, ok: false }));
+	});
+
+	it("still fails on a non-zero exit when allowFailure is false", async () => {
+		const result = await run(workflow([shellStep("probe", "exit 1", { allowFailure: false })]));
+
+		expect(result.status).toBe("failed");
+		expect(result.steps[0]?.errorCode).toBe("shell_nonzero_exit");
+	});
+
+	it("still fails on a timeout, with or without allowFailure", async () => {
+		holder.window = {
+			require: (id: string) =>
+				id === "child_process"
+					? {
+							execFile: (_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
+								callback(Object.assign(new Error("killed"), { killed: true, signal: "SIGTERM", code: null }), "partial", ""),
+						}
+					: undefined,
+		};
+		for (const extra of [{}, { allowFailure: true }]) {
+			const result = await run(workflow([shellStep("probe", "sleep 9", { timeoutMs: 50, ...extra })]));
+
+			expect(result.status).toBe("failed");
+			expect(result.error).toBe("shell.run timed out after 50ms");
+			expect(result.steps[0]?.status).toBe("failed");
+		}
 	});
 });
