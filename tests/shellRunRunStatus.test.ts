@@ -165,11 +165,11 @@ describe("shell.run exit status decides the run status", () => {
 		expect(result.steps[1]?.output).toEqual(expect.objectContaining({ stdout: "code=3 ok=false\n" }));
 	});
 
-	it("reads allowFailure written as the string \"true\"", async () => {
+	it("reads only the boolean true as allowFailure, as the editor checkbox does", async () => {
 		const result = await run(workflow([shellStep("probe", "exit 1", { allowFailure: "true" })]));
 
-		expect(result.status).toBe("success");
-		expect(result.steps[0]?.output).toEqual(expect.objectContaining({ exitCode: 1, ok: false }));
+		expect(result.status).toBe("failed");
+		expect(result.steps[0]?.errorCode).toBe("shell_nonzero_exit");
 	});
 
 	it("still fails on a non-zero exit when allowFailure is false", async () => {
@@ -186,6 +186,25 @@ describe("shell.run exit status decides the run status", () => {
 					? {
 							execFile: (_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
 								callback(Object.assign(new Error("killed"), { killed: true, signal: "SIGTERM", code: null }), "partial", ""),
+						}
+					: undefined,
+		};
+		for (const extra of [{}, { allowFailure: true }]) {
+			const result = await run(workflow([shellStep("probe", "sleep 9", { timeoutMs: 50, ...extra })]));
+
+			expect(result.status).toBe("failed");
+			expect(result.error).toBe("shell.run timed out after 50ms");
+			expect(result.steps[0]?.status).toBe("failed");
+		}
+	});
+
+	it("still fails on a timeout when the killed shell reports a numeric exit code (a SIGTERM trap)", async () => {
+		holder.window = {
+			require: (id: string) =>
+				id === "child_process"
+					? {
+							execFile: (_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
+								callback(Object.assign(new Error("killed"), { killed: true, signal: null, code: 1 }), "", ""),
 						}
 					: undefined,
 		};

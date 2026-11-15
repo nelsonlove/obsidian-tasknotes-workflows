@@ -818,7 +818,7 @@ function createDefaultSteps(): StepDefinition[] {
 					type: "boolean",
 					defaultValue: false,
 					description:
-						"When on, a non-zero exit does not fail the step: it succeeds with ok: false, and later steps read the exit code. A timeout or a signal still fails the step.",
+						"When on, a non-zero exit does not fail the step: it succeeds with ok: false, and later steps read the exit code. A timeout, or a signal that kills the shell itself, still fails the step.",
 				},
 			],
 			outputFields: [
@@ -877,7 +877,7 @@ function createDefaultSteps(): StepDefinition[] {
 				}
 				const timeoutRaw = record.timeoutMs;
 				const timeout = typeof timeoutRaw === "number" && timeoutRaw > 0 ? timeoutRaw : 120_000;
-				const allowFailure = record.allowFailure === true || record.allowFailure === "true";
+				const allowFailure = record.allowFailure === true;
 
 				return await new Promise((resolve, reject) => {
 					childProcess.execFile(
@@ -885,7 +885,9 @@ function createDefaultSteps(): StepDefinition[] {
 						["-lc", command],
 						{ cwd, timeout, maxBuffer: 16 * 1024 * 1024, encoding: "utf8" },
 						(error, stdout, stderr) => {
-							if (error && typeof error.code !== "number") {
+							// A timeout fails the step even when the killed shell still reports a
+							// numeric exit code (a trap on SIGTERM), so allowFailure never hides it.
+							if (error && (error.killed || typeof error.code !== "number")) {
 								reject(
 									new Error(
 										error.killed ? `shell.run timed out after ${timeout}ms` : error.message
