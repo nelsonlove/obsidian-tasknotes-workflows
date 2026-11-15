@@ -818,7 +818,7 @@ function createDefaultSteps(): StepDefinition[] {
 					type: "boolean",
 					defaultValue: false,
 					description:
-						"When on, a non-zero exit does not fail the step: it succeeds with ok: false, and later steps read the exit code. A timeout that kills the command, or a signal that kills it, still fails the step.",
+						"When on, a non-zero exit does not fail the step: it succeeds with ok: false, and later steps read the exit code. A timeout, or a signal that kills the shell, still fails the step; only the shell's own exit status counts.",
 				},
 			],
 			outputFields: [

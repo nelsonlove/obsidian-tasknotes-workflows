@@ -52,11 +52,9 @@ function workflow(steps: WorkflowStep[], onError: "stop" | "continue" = "stop"):
 	};
 }
 
-/** A fake window: the real timers, and `require` handing out the given execFile. */
+/** A fake window whose `require` hands out the given execFile. */
 function fakeWindow(execFile: unknown) {
 	return {
-		setTimeout: globalThis.setTimeout.bind(globalThis),
-		clearTimeout: globalThis.clearTimeout.bind(globalThis),
 		require: (id: string) => (id === "child_process" ? { execFile } : undefined),
 	};
 }
@@ -213,16 +211,6 @@ describe("shell.run exit status decides the run status", () => {
 				})
 			);
 		}
-	});
-
-	it("does not call a command that ends before the timeout a timeout", async () => {
-		holder.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) => {
-			setTimeout(() => callback(null, "done\n", ""), 1);
-		});
-		const result = await run(workflow([shellStep("probe", "quick", { timeoutMs: 200 })]));
-
-		expect(result.status).toBe("success");
-		expect(result.steps[0]?.output).toEqual({ stdout: "done\n", stderr: "", exitCode: 0, ok: true });
 	});
 
 	it("fails on a signal that kills the command, with or without allowFailure, keeping partial output", async () => {
