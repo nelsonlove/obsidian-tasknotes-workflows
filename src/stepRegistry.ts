@@ -793,7 +793,7 @@ function createDefaultSteps(): StepDefinition[] {
 			type: "shell.run",
 			label: "Run shell command",
 			description:
-				'Run a shell command through a login shell (desktop only); awaits it and returns stdout, stderr, and the exit code. A non-zero exit fails the step. Requires "Allow code steps" in settings.',
+				'Run a shell command through a login shell (desktop only); awaits it and returns stdout, stderr, and the exit code. A non-zero exit fails the step unless "Allow failure" is set. Requires "Allow code steps" in settings.',
 			category: "Obsidian",
 			inputFields: [
 				{
@@ -812,6 +812,14 @@ function createDefaultSteps(): StepDefinition[] {
 					placeholder: "Absolute, or vault-relative; defaults to the vault root.",
 				},
 				{ key: "timeoutMs", label: "Timeout (ms)", type: "number", defaultValue: 120_000 },
+				{
+					key: "allowFailure",
+					label: "Allow failure",
+					type: "boolean",
+					defaultValue: false,
+					description:
+						"When on, a non-zero exit does not fail the step: it succeeds with ok: false, and later steps read the exit code. A timeout or a signal still fails the step.",
+				},
 			],
 			outputFields: [
 				{ key: "stdout", label: "stdout", type: "string" },
@@ -869,6 +877,7 @@ function createDefaultSteps(): StepDefinition[] {
 				}
 				const timeoutRaw = record.timeoutMs;
 				const timeout = typeof timeoutRaw === "number" && timeoutRaw > 0 ? timeoutRaw : 120_000;
+				const allowFailure = record.allowFailure === true || record.allowFailure === "true";
 
 				return await new Promise((resolve, reject) => {
 					childProcess.execFile(
@@ -891,9 +900,10 @@ function createDefaultSteps(): StepDefinition[] {
 								exitCode,
 								ok: exitCode === 0,
 							};
-							if (exitCode !== 0) {
+							if (exitCode !== 0 && !allowFailure) {
 								// A non-zero exit fails the step (and, with onError: stop, the run),
-								// keeping stdout/stderr/exitCode in the step record.
+								// keeping stdout/stderr/exitCode in the step record. With allowFailure
+								// the step resolves with ok: false instead.
 								const stderrTail = result.stderr.trim().split(/\r?\n/).slice(-1)[0]?.trim().slice(0, 500);
 								reject(
 									new StepFailure(
