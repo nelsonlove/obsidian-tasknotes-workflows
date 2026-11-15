@@ -10,7 +10,7 @@
 
 ### Fixed
 
-- A `shell.run` step whose command exits non-zero now fails the step, so with `onError: stop` the run is recorded as failed instead of "success". The run's error names the exit code and the last stderr line, and the failed step keeps `stdout`, `stderr`, `exitCode` and `ok` as its output, so with `onError: continue` later steps still run and can still read `steps.<id>.output.exitCode`. In a `forEach`, a non-zero exit now stops the remaining items, as any failing step does. A timeout or a signal now also fails the step as a `StepFailure` (codes `shell_timeout` and `shell_signal`), keeping the partial `stdout` and `stderr` as its output with `exitCode: null`, and a timeout counts even when the command traps the kill signal and then exits 0. The signal error names the signal and the last stderr line, not the whole command.
+- A `shell.run` step whose command exits non-zero now fails the step, so with `onError: stop` the run is recorded as failed instead of "success". The run's error names the exit code and the last stderr line, and the failed step keeps `stdout`, `stderr`, `exitCode` and `ok` as its output, so with `onError: continue` later steps still run and can still read `steps.<id>.output.exitCode`. In a `forEach`, a non-zero exit now stops the remaining items, as any failing step does. A timeout or a signal now also fails the step with the error code `shell_timeout` or `shell_signal`, keeping the partial `stdout` and `stderr` as its output with `exitCode: null`, and a timeout counts even when the command traps the kill signal and then exits 0. The signal error names the signal and the last stderr line, not the whole command.
 
 ## [0.1.4-nl.4] - 2026-09-22
 

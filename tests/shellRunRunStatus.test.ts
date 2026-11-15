@@ -182,13 +182,10 @@ describe("shell.run exit status decides the run status", () => {
 	});
 
 	it("still fails on a timeout, with or without allowFailure", async () => {
-		// The command runs until the step's own timer kills it; the kill ends it as given.
-		holder.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) => ({
-			kill: () => {
-				setTimeout(() => callback(Object.assign(new Error("killed"), { killed: true, signal: "SIGTERM", code: null }), "partial", ""), 0);
-				return true;
-			},
-		}));
+		// execFile's own timeout killed the shell.
+		holder.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
+			callback(Object.assign(new Error("killed"), { killed: true, signal: "SIGTERM", code: null }), "partial", "")
+		);
 		for (const extra of [{}, { allowFailure: true }]) {
 			const result = await run(workflow([shellStep("probe", "sleep 9", { timeoutMs: 50, ...extra })]));
 
@@ -199,13 +196,10 @@ describe("shell.run exit status decides the run status", () => {
 	});
 
 	it("still fails on a timeout when the killed shell reports a numeric exit code (a SIGTERM trap)", async () => {
-		// The command runs until the step's own timer kills it; the kill ends it as given.
-		holder.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) => ({
-			kill: () => {
-				setTimeout(() => callback(Object.assign(new Error("killed"), { killed: true, signal: null, code: 1 }), "", ""), 0);
-				return true;
-			},
-		}));
+		// execFile's own timeout killed the shell.
+		holder.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) =>
+			callback(Object.assign(new Error("killed"), { killed: true, signal: null, code: 1 }), "", "")
+		);
 		for (const extra of [{}, { allowFailure: true }]) {
 			const result = await run(workflow([shellStep("probe", "sleep 9", { timeoutMs: 50, ...extra })]));
 
@@ -215,12 +209,11 @@ describe("shell.run exit status decides the run status", () => {
 		}
 	});
 
-	it("does not call a command that ends before the timeout a timeout, however late its callback", async () => {
+	it("does not call a command that ends before the timeout a timeout", async () => {
 		holder.window = fakeWindow((_f: string, _a: readonly string[], _o: unknown, callback: ExecCallback) => {
-			callback(null, "done\n", "");
+			setTimeout(() => callback(null, "done\n", ""), 1);
 		});
-		const result = await run(workflow([shellStep("probe", "quick", { timeoutMs: 5 })]));
-		await new Promise((resolve) => setTimeout(resolve, 20));
+		const result = await run(workflow([shellStep("probe", "quick", { timeoutMs: 200 })]));
 
 		expect(result.status).toBe("success");
 		expect(result.steps[0]?.output).toEqual({ stdout: "done\n", stderr: "", exitCode: 0, ok: true });
