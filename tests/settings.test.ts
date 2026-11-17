@@ -40,15 +40,9 @@ describe("normalizeAllowedFrontmatterKeys", () => {
 	});
 });
 
-describe("pauseFlagPath", () => {
-	it("is empty by default, so the shipped plugin names no path", () => {
-		expect(DEFAULT_SETTINGS.pauseFlagPath).toBe("");
-		expect(normalizeSettings({}).pauseFlagPath).toBe("");
-	});
-
-	it("trims, keeps an empty value, and drops a non-string", () => {
-		expect(normalizeSettings({ pauseFlagPath: "  ~/flags/pause  " }).pauseFlagPath).toBe("~/flags/pause");
-		expect(normalizeSettings({ pauseFlagPath: "   " }).pauseFlagPath).toBe("");
-		expect(normalizeSettings({ pauseFlagPath: 7 as never }).pauseFlagPath).toBe("");
+describe("pause flag path", () => {
+	it("is not a data.json setting, so a sync service cannot copy it to every device", () => {
+		expect("pauseFlagPath" in DEFAULT_SETTINGS).toBe(false);
+		expect("pauseFlagPath" in normalizeSettings({})).toBe(false);
 	});
 });

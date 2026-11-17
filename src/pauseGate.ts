@@ -1,3 +1,4 @@
+// EXIT: the fail-closed pause flag file road goes when the fleet pause has no other state than the key file and every reader reads it; renew by the monthly sweep.
 import { normalizePath, TFile, TFolder, type App } from "obsidian";
 
 export interface PauseState {
@@ -28,7 +29,8 @@ export interface PauseFlagHost {
  * Node's fs and the home folder, on desktop. Returns null on mobile, where the
  * plugin has no Node: the gate then falls back to the pause note. Loaded with
  * `window.require` at call time, as shell.run does, so the plugin still loads
- * on mobile.
+ * on mobile. Throws when Node is there but fs or os cannot be loaded; the
+ * gate reads that as a flag it cannot read, so as a pause.
  */
 export function desktopFlagHost(): PauseFlagHost | null {
 	const nodeRequire =
@@ -36,19 +38,49 @@ export function desktopFlagHost(): PauseFlagHost | null {
 			? (window as unknown as { require?: (id: string) => unknown }).require
 			: undefined;
 	if (typeof nodeRequire !== "function") return null;
-	try {
-		const fs = nodeRequire("fs") as PauseFlagFs;
-		const os = nodeRequire("os") as { homedir(): string };
-		return { fs, homedir: os.homedir() };
-	} catch {
-		return null;
+	const fs = nodeRequire("fs") as PauseFlagFs;
+	const os = nodeRequire("os") as { homedir(): string };
+	return { fs, homedir: os.homedir() };
+}
+
+/** Local-storage key for this device's pause flag path. Scoped per vault by Obsidian. */
+export const PAUSE_FLAG_PATH_STORAGE_KEY = "tasknotes-workflows-pause-flag-path";
+
+/**
+ * This device's pause flag path, kept in Obsidian's per-vault, per-device
+ * local storage (`app.loadLocalStorage`), never in the plugin's `data.json`.
+ * The file lives on one machine; `data.json` can be copied to every device by
+ * a sync service, and a device without the file would read "missing", so
+ * "not paused", and stop reading the pause note too. Per device, each machine
+ * opts in only where the file is.
+ */
+export class PauseFlagPathStore {
+	private cached: string | null = null;
+
+	constructor(private readonly app: App) {}
+
+	get(): string {
+		if (this.cached !== null) return this.cached;
+		try {
+			const value: unknown = this.app.loadLocalStorage(PAUSE_FLAG_PATH_STORAGE_KEY);
+			this.cached = typeof value === "string" ? value.trim() : "";
+		} catch {
+			this.cached = "";
+		}
+		return this.cached;
+	}
+
+	set(value: string): void {
+		const path = value.trim();
+		this.app.saveLocalStorage(PAUSE_FLAG_PATH_STORAGE_KEY, path.length > 0 ? path : null);
+		this.cached = path;
 	}
 }
 
 /**
  * The pause check. Two roads, chosen by settings:
  *
- * - The flag FILE (setting "Pause flag file", desktop only): a small
+ * - The flag FILE (setting "Pause flag file", per device, desktop only): a small
  *   `key: value` file outside the vault. It FAILS CLOSED: a file that exists
  *   but cannot be read or parsed is a pause, because a pause is a human saying
  *   stop and "I could not tell" must not mean "carry on". A missing file is
@@ -66,6 +98,8 @@ export function desktopFlagHost(): PauseFlagHost | null {
  */
 export class PauseGate {
 	private warned = new Set<string>();
+	/** The Node host, loaded once per plugin load. */
+	private host: PauseFlagHost | null | undefined;
 
 	constructor(
 		private readonly app: App,
@@ -77,7 +111,15 @@ export class PauseGate {
 	check(): PauseState {
 		const flagPath = this.getFlagPath().trim();
 		if (flagPath.length > 0) {
-			const host = this.getFlagHost();
+			let host: PauseFlagHost | null;
+			try {
+				if (this.host === undefined) this.host = this.getFlagHost();
+				host = this.host;
+			} catch {
+				// Node is there but fs or os would not load: a flag that cannot
+				// be read, so a pause. Not cached, so the next run tries again.
+				return this.unreadable(flagPath, "Node's file system could not be loaded");
+			}
 			if (host) return this.checkFlagFile(flagPath, host);
 			this.warnOnce(
 				`mobile:${flagPath}`,
@@ -90,12 +132,29 @@ export class PauseGate {
 	private checkFlagFile(configured: string, host: PauseFlagHost): PauseState {
 		const path = expandHome(configured, host.homedir);
 		const state = readPauseFlag(path, host.fs);
-		if (state.kind === "absent" || state.kind === "clear") return NOT_PAUSED;
+		if (state.kind === "absent") {
+			// Missing is "not paused", by design. A missing FOLDER more likely
+			// means a mistyped path, so say so once; it still is not a pause.
+			if (!parentExists(path, host.fs)) {
+				this.warnOnce(
+					`nofolder:${path}`,
+					`TaskNotes Workflows: the folder of the pause flag file "${path}" does not exist; check the path. Workflows run normally.`
+				);
+			}
+			return NOT_PAUSED;
+		}
+		if (state.kind === "clear") return NOT_PAUSED;
 		if (state.kind === "paused") return { paused: true, reason: state.reason };
-		// Fail closed: the reason stays the same from one read to the next, so
-		// the skip log records this once per workflow, not once per tick.
-		const reason = `the pause flag cannot be read, so runs are held: ${state.reason} (${path})`;
-		this.warnOnce(`bad:${path}:${state.reason}`, `TaskNotes Workflows: ${reason}.`);
+		return this.unreadable(path, state.reason);
+	}
+
+	/**
+	 * Fail closed. The reason stays the same from one read to the next, so the
+	 * skip log records it once per workflow, not once per tick.
+	 */
+	private unreadable(path: string, why: string): PauseState {
+		const reason = `the pause flag cannot be read, so runs are held: ${why} (${path})`;
+		this.warnOnce(`bad:${path}:${why}`, `TaskNotes Workflows: ${reason}.`);
 		return { paused: true, reason };
 	}
 
@@ -162,9 +221,7 @@ export function readPauseFlag(path: string, fs: PauseFlagFs): PauseFlagRead {
 	try {
 		stat = fs.lstatSync(path);
 	} catch (error) {
-		const code = (error as { code?: unknown } | null)?.code;
-		if (code === "ENOENT") return { kind: "absent" };
-		return { kind: "bad", reason: `it cannot be read (${typeof code === "string" ? code : "unknown error"})` };
+		return readFailure(error);
 	}
 	if (stat.isSymbolicLink()) return { kind: "bad", reason: "it is a symlink, not a plain file" };
 	if (!stat.isFile()) return { kind: "bad", reason: "it is not a plain file" };
@@ -173,14 +230,30 @@ export function readPauseFlag(path: string, fs: PauseFlagFs): PauseFlagRead {
 	try {
 		text = fs.readFileSync(path, "utf8");
 	} catch (error) {
-		const code = (error as { code?: unknown } | null)?.code;
-		// Gone between the two calls: the same as missing.
-		if (code === "ENOENT") return { kind: "absent" };
-		return { kind: "bad", reason: `it cannot be read (${typeof code === "string" ? code : "unknown error"})` };
+		// Gone between the two calls reads as missing, as from lstat.
+		return readFailure(error);
 	}
 	const parsed = parsePauseFlag(text);
 	if (parsed.kind !== "paused") return parsed;
 	return { kind: "paused", reason: `${parsed.reason} (${path})` };
+}
+
+/** Only "no such file" is missing; every other error is a flag that cannot be read. */
+function readFailure(error: unknown): PauseFlagRead {
+	const code = (error as { code?: unknown } | null)?.code;
+	if (code === "ENOENT") return { kind: "absent" };
+	return { kind: "bad", reason: `it cannot be read (${typeof code === "string" ? code : "unknown error"})` };
+}
+
+function parentExists(path: string, fs: PauseFlagFs): boolean {
+	const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+	if (slash <= 0) return true;
+	try {
+		fs.lstatSync(path.slice(0, slash));
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 const FLAG_KEYS = new Set(["paused", "why", "by", "at"]);

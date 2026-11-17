@@ -216,11 +216,11 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Pause flag file")
 			.setDesc(
-				"Desktop only. Absolute path of a pause flag file outside the vault; a leading ~ is your home folder. The file holds `key: value` lines: `paused` (true, false, yes or no) and, optionally, `why`, `by` and `at`. While it says paused, no workflow runs. A missing file is not a pause; a file that exists but cannot be read or parsed holds every run. When set, the pause note above is not read on desktop. Leave empty to use the pause note."
+				"This device only (kept per device, not synced), desktop only. Absolute path of a pause flag file outside the vault; a leading ~ is your home folder. The file holds `key: value` lines: `paused` (true, false, yes or no) and, optionally, `why`, `by` and `at`. While it says paused, no workflow runs. A missing file is not a pause; a file that exists but cannot be read or parsed holds every run. When set, the pause note above is not read on desktop. Leave empty to use the pause note."
 			)
 			.addText((text) => {
 				text.setPlaceholder("~/pause-flag");
-				text.setValue(this.workflowsPlugin.settings.pauseFlagPath);
+				text.setValue(this.workflowsPlugin.pauseFlagPath);
 				this.commitTextOnFinish(text, (value) => {
 					this.updatePauseFlagPath(value);
 				});
@@ -388,9 +388,8 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 	private updatePauseFlagPath(value: string): void {
 		// Empty is a meaningful value here: it hands the check back to the pause note.
 		const next = value.trim();
-		if (next === this.workflowsPlugin.settings.pauseFlagPath) return;
-		this.workflowsPlugin.settings.pauseFlagPath = next;
-		void this.workflowsPlugin.saveSettings();
+		if (next === this.workflowsPlugin.pauseFlagPath) return;
+		this.workflowsPlugin.setPauseFlagPath(next);
 	}
 
 	private renderAllowedKeysWarning(ignored: string[]): void {

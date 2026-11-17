@@ -1,6 +1,8 @@
 import { TFile, TFolder } from "obsidian";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	PAUSE_FLAG_PATH_STORAGE_KEY,
+	PauseFlagPathStore,
 	PauseGate,
 	PauseSkipLog,
 	expandHome,
@@ -161,8 +163,38 @@ function flagGate(files: Record<string, FakeEntry>, flagPath = FLAG, app: never 
 }
 
 describe("pause gate, flag file road", () => {
-	it("a missing flag file is not a pause", () => {
-		expect(flagGate({}).check()).toEqual({ paused: false });
+	it("a missing flag file is not a pause, and is silent when its folder exists", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		expect(flagGate({ "/srv/example": { folder: true } }).check()).toEqual({ paused: false });
+		expect(warn).not.toHaveBeenCalled();
+	});
+
+	it("warns once, but still does not pause, when the flag's folder is missing", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const gate = flagGate({});
+		expect(gate.check()).toEqual({ paused: false });
+		gate.check();
+		expect(warn).toHaveBeenCalledTimes(1);
+		expect(warn.mock.calls[0]?.[0]).toContain("does not exist; check the path");
+	});
+
+	it("fails closed when Node is there but its file system will not load", () => {
+		vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const gate = new PauseGate(emptyApp(), () => "", () => FLAG, () => {
+			throw new Error("no fs");
+		});
+		const state = gate.check();
+		expect(state.paused).toBe(true);
+		expect(state.reason).toContain("could not be loaded");
+	});
+
+	it("loads the Node host once per gate", () => {
+		const host = fakeHost({ [FLAG]: "paused: false\n" });
+		const load = vi.fn(() => host);
+		const gate = new PauseGate(emptyApp(), () => "", () => FLAG, load);
+		gate.check();
+		gate.check();
+		expect(load).toHaveBeenCalledTimes(1);
 	});
 
 	it("pauses on paused: true and reports who, since, why and the file", () => {
@@ -278,6 +310,38 @@ describe("pause gate, flag file road", () => {
 
 	it("defaults to the note road when constructed without a flag path", () => {
 		expect(new PauseGate(appWith({ paused: true }), () => PAUSE_PATH).check().paused).toBe(true);
+	});
+});
+
+describe("pause flag path store", () => {
+	function storageApp(initial?: unknown) {
+		const store = new Map<string, unknown>();
+		if (initial !== undefined) store.set(PAUSE_FLAG_PATH_STORAGE_KEY, initial);
+		const app = {
+			loadLocalStorage: (key: string) => (store.has(key) ? store.get(key) : null),
+			saveLocalStorage: (key: string, value: unknown) => {
+				if (value === null) store.delete(key);
+				else store.set(key, value);
+			},
+		};
+		return { app: app as never, store };
+	}
+
+	it("reads and trims the per-device value, empty when unset", () => {
+		expect(new PauseFlagPathStore(storageApp().app).get()).toBe("");
+		expect(new PauseFlagPathStore(storageApp("  ~/flags/pause ").app).get()).toBe("~/flags/pause");
+		expect(new PauseFlagPathStore(storageApp(42).app).get()).toBe("");
+	});
+
+	it("saves a trimmed value, and removes the key when set empty", () => {
+		const { app, store } = storageApp();
+		const paths = new PauseFlagPathStore(app);
+		paths.set("  /srv/example/pause ");
+		expect(store.get(PAUSE_FLAG_PATH_STORAGE_KEY)).toBe("/srv/example/pause");
+		expect(paths.get()).toBe("/srv/example/pause");
+		paths.set("   ");
+		expect(store.has(PAUSE_FLAG_PATH_STORAGE_KEY)).toBe(false);
+		expect(paths.get()).toBe("");
 	});
 });
 

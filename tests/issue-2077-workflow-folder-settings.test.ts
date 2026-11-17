@@ -316,6 +316,8 @@ function mockPlugin(): MockPlugin {
 		workflows: [],
 		machineName: "",
 		setMachineName: vi.fn(async () => {}),
+		pauseFlagPath: "",
+		setPauseFlagPath: vi.fn(),
 	};
 }
 
@@ -337,4 +339,6 @@ type MockPlugin = {
 	workflows: unknown[];
 	machineName: string;
 	setMachineName: ReturnType<typeof vi.fn>;
+	pauseFlagPath: string;
+	setPauseFlagPath: ReturnType<typeof vi.fn>;
 };
