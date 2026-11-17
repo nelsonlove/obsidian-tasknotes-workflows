@@ -1,3 +1,6 @@
+import * as nodeFs from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { TFile, TFolder } from "obsidian";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -8,6 +11,7 @@ import {
 	expandHome,
 	isPausedValue,
 	parsePauseFlag,
+	readPauseFlag,
 	type PauseFlagFs,
 	type PauseFlagHost,
 } from "../src/pauseGate";
@@ -153,6 +157,17 @@ function fakeHost(files: Record<string, FakeEntry>, homedir = HOME): PauseFlagHo
 			if (typeof entry === "string") return entry;
 			return fail("EIO");
 		},
+		// Folders: "/", a {folder} entry, or any folder above a listed path.
+		statSync(path) {
+			const isFolder =
+				path === "/" ||
+				(typeof files[path] === "object" && "folder" in (files[path] as object)) ||
+				Object.keys(files).some((key) => key.startsWith(`${path}/`));
+			if (!isFolder) return fail("ENOENT");
+			return { isDirectory: () => true };
+		},
+		accessSync() {},
+		realpathSync: (path) => path,
 	};
 	return { fs, homedir, reads };
 }
@@ -310,6 +325,108 @@ describe("pause gate, flag file road", () => {
 
 	it("defaults to the note road when constructed without a flag path", () => {
 		expect(new PauseGate(appWith({ paused: true }), () => PAUSE_PATH).check().paused).toBe(true);
+	});
+});
+
+describe("parity with the shell reader: space", () => {
+	it("reads a no-break space, an em space or a BOM next to the value as bad, not clear", () => {
+		const cases = [
+			"paused: false\u00a0\n",
+			"paused:\u00a0false\n",
+			"paused: false\u2003\n",
+			"paused: false\ufeff\n",
+		];
+		for (const text of cases) {
+			expect(parsePauseFlag(text).kind, JSON.stringify(text)).toBe("bad");
+		}
+	});
+
+	it("takes tab, space, vertical tab and form feed as space", () => {
+		for (const text of ["paused:\tfalse\t\n", "paused: false \v\f\n", "paused:false"]) {
+			expect(parsePauseFlag(text).kind, JSON.stringify(text)).toBe("clear");
+		}
+	});
+
+	it("strips the quotes before the edges, and double then single quotes", () => {
+		// The shell strips quotes only when they are the last characters.
+		expect(parsePauseFlag('paused: "false"  \n').kind).toBe("bad");
+		expect(parsePauseFlag(`paused: "'false'"\n`).kind).toBe("clear");
+		expect(parsePauseFlag(`paused: '"false"'\n`).kind).toBe("bad");
+	});
+
+	it("lowers ASCII letters only", () => {
+		expect(parsePauseFlag("paused: FALSE\n").kind).toBe("clear");
+		expect(parsePauseFlag("paused: tru\u0130\n").kind).toBe("bad");
+	});
+
+	it("leaves a NUL byte in the value as bad (fail closed)", () => {
+		expect(parsePauseFlag("paused: false\u0000\n").kind).toBe("bad");
+	});
+});
+
+describe("parity with the shell reader: folders (real file system)", () => {
+	let root = "";
+	const made: string[] = [];
+
+	function scratch(): string {
+		root = nodeFs.mkdtempSync(join(tmpdir(), "tnw-pause-"));
+		made.push(root);
+		return root;
+	}
+
+	afterEach(() => {
+		for (const dir of made.splice(0)) {
+			try {
+				nodeFs.chmodSync(join(dir, "locked"), 0o755);
+			} catch {
+				// not made by this test
+			}
+			nodeFs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("reads a flag in a plain folder", () => {
+		const dir = scratch();
+		nodeFs.mkdirSync(join(dir, "cases"));
+		nodeFs.writeFileSync(join(dir, "cases", "flag"), "paused: false\n");
+		expect(readPauseFlag(join(dir, "cases", "flag"), nodeFs, "/nonexistent-home").kind).toBe("clear");
+	});
+
+	it("refuses a flag whose folder is a symlink, even when the flag says clear", () => {
+		const dir = scratch();
+		nodeFs.mkdirSync(join(dir, "cases", "real"), { recursive: true });
+		nodeFs.symlinkSync(join(dir, "cases", "real"), join(dir, "cases", "linkdir"));
+		nodeFs.writeFileSync(join(dir, "cases", "real", "flag"), "paused: false\n");
+		const read = readPauseFlag(join(dir, "cases", "linkdir", "flag"), nodeFs, "/nonexistent-home");
+		expect(read.kind).toBe("bad");
+	});
+
+	it("refuses a symlinked folder anywhere between the home folder and the flag", () => {
+		const home = scratch();
+		nodeFs.mkdirSync(join(home, "real", "deeper"), { recursive: true });
+		nodeFs.symlinkSync(join(home, "real"), join(home, "link"));
+		nodeFs.writeFileSync(join(home, "real", "deeper", "flag"), "paused: false\n");
+		expect(readPauseFlag(join(home, "link", "deeper", "flag"), nodeFs, home).kind).toBe("bad");
+		expect(readPauseFlag(join(home, "real", "deeper", "flag"), nodeFs, home).kind).toBe("clear");
+	});
+
+	it("refuses a missing flag in a symlinked folder, which would else read as missing", () => {
+		const dir = scratch();
+		nodeFs.mkdirSync(join(dir, "real"));
+		nodeFs.symlinkSync(join(dir, "real"), join(dir, "linkdir"));
+		expect(readPauseFlag(join(dir, "linkdir", "flag"), nodeFs, "/nonexistent-home").kind).toBe("bad");
+	});
+
+	it("reads a missing folder as missing when the nearest folder can be entered", () => {
+		const dir = scratch();
+		expect(readPauseFlag(join(dir, "not", "yet", "flag"), nodeFs, "/nonexistent-home").kind).toBe("absent");
+	});
+
+	it.skipIf(process.getuid?.() === 0)("refuses a flag under a folder that cannot be entered", () => {
+		const dir = scratch();
+		nodeFs.mkdirSync(join(dir, "locked", "sub"), { recursive: true });
+		nodeFs.chmodSync(join(dir, "locked"), 0o000);
+		expect(readPauseFlag(join(dir, "locked", "sub", "flag"), nodeFs, "/nonexistent-home").kind).toBe("bad");
 	});
 });
 

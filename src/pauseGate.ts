@@ -17,8 +17,17 @@ export const MAX_FLAG_BYTES = 4096;
 export interface PauseFlagFs {
 	/** Like fs.lstatSync: throws an error with a `code` when the path cannot be read. */
 	lstatSync(path: string): { isSymbolicLink(): boolean; isFile(): boolean; size: number };
+	/** Like fs.statSync: follows links. */
+	statSync(path: string): { isDirectory(): boolean };
+	/** Like fs.accessSync: throws when the mode is not granted. */
+	accessSync(path: string, mode: number): void;
+	/** Like fs.realpathSync: the physical path, every link resolved. */
+	realpathSync(path: string): string;
 	readFileSync(path: string, encoding: "utf8"): string;
 }
+
+/** fs.constants.X_OK on every platform Node runs on. */
+const X_OK = 1;
 
 export interface PauseFlagHost {
 	fs: PauseFlagFs;
@@ -131,7 +140,7 @@ export class PauseGate {
 
 	private checkFlagFile(configured: string, host: PauseFlagHost): PauseState {
 		const path = expandHome(configured, host.homedir);
-		const state = readPauseFlag(path, host.fs);
+		const state = readPauseFlag(path, host.fs, host.homedir);
 		if (state.kind === "absent") {
 			// Missing is "not paused", by design. A missing FOLDER more likely
 			// means a mistyped path, so say so once; it still is not a pause.
@@ -213,9 +222,15 @@ export type PauseFlagRead =
  * Reads the pause flag file at an absolute path. Missing is `absent`; every
  * other failure is `bad`, which the gate treats as paused.
  */
-export function readPauseFlag(path: string, fs: PauseFlagFs): PauseFlagRead {
+export function readPauseFlag(path: string, fs: PauseFlagFs, homedir = ""): PauseFlagRead {
 	if (!isAbsolutePath(path)) {
 		return { kind: "bad", reason: "the path is not absolute" };
+	}
+	if (!flagFolderOk(path, fs, homedir)) {
+		return {
+			kind: "bad",
+			reason: "its folder, or a folder above it up to the home folder, is a symlink or cannot be entered",
+		};
 	}
 	let stat: ReturnType<PauseFlagFs["lstatSync"]>;
 	try {
@@ -236,6 +251,84 @@ export function readPauseFlag(path: string, fs: PauseFlagFs): PauseFlagRead {
 	const parsed = parsePauseFlag(text);
 	if (parsed.kind !== "paused") return parsed;
 	return { kind: "paused", reason: `${parsed.reason} (${path})` };
+}
+
+function posixDirname(path: string): string {
+	const trimmed = path.replace(/\/+$/, "");
+	const slash = trimmed.lastIndexOf("/");
+	if (slash < 0) return ".";
+	if (slash === 0) return "/";
+	return trimmed.slice(0, slash).replace(/\/+$/, "") || "/";
+}
+
+function posixBasename(path: string): string {
+	const trimmed = path.replace(/\/+$/, "");
+	// basename "/" is "/", so a flag in the root folder fails the compare, as there.
+	if (trimmed.length === 0) return path.length > 0 ? "/" : "";
+	return trimmed.slice(trimmed.lastIndexOf("/") + 1);
+}
+
+/** `[ -e p ]`: true when stat (which follows links) succeeds. */
+function exists(path: string, fs: PauseFlagFs): boolean {
+	try {
+		fs.statSync(path);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** `[ -L p ]`. */
+function isLink(path: string, fs: PauseFlagFs): boolean {
+	try {
+		return fs.lstatSync(path).isSymbolicLink();
+	} catch {
+		return false;
+	}
+}
+
+/** `cd p && pwd -P`: the physical path of a folder we can enter, or null. */
+function physicalFolder(path: string, fs: PauseFlagFs): string | null {
+	try {
+		if (!fs.statSync(path).isDirectory()) return null;
+		fs.accessSync(path, X_OK);
+		const real = fs.realpathSync(path);
+		return real.length > 0 ? real : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * The shell reader's pause_flag_dir_ok, step for step, so the two readers give
+ * one answer. True when no folder on the way to the flag's folder is a symlink
+ * (the folder's physical path is its written path once the home folder's own
+ * physical path is put in), or when the folder does not exist yet and the
+ * nearest folder that does exist can be entered (a folder that cannot be
+ * searched hides the flag, and a hidden flag must not read as missing).
+ * POSIX paths only; other paths are not checked.
+ */
+function flagFolderOk(path: string, fs: PauseFlagFs, homedir: string): boolean {
+	if (!path.startsWith("/")) return true;
+	const folder = posixDirname(path);
+	if (!exists(folder, fs) && !isLink(folder, fs)) {
+		let above = posixDirname(folder);
+		while (!exists(above, fs) && above !== "/") above = posixDirname(above);
+		return physicalFolder(above, fs) !== null;
+	}
+	const physical = physicalFolder(folder, fs);
+	if (physical === null) return false;
+	let want: string;
+	if (homedir.length > 0 && folder.startsWith(`${homedir}/`)) {
+		const home = physicalFolder(homedir, fs);
+		if (home === null) return false;
+		want = `${home}/${folder.slice(homedir.length + 1)}`;
+	} else {
+		const parent = physicalFolder(posixDirname(folder), fs);
+		if (parent === null) return false;
+		want = `${parent.replace(/\/+$/, "")}/${posixBasename(folder)}`;
+	}
+	return physical === want;
 }
 
 /** Only "no such file" is missing; every other error is a flag that cannot be read. */
@@ -270,7 +363,7 @@ export function parsePauseFlag(text: string): PauseFlagRead {
 	for (let index = 0; index < lines.length; index += 1) {
 		const line = lines[index] ?? "";
 		if (/^[ \t]*$/.test(line) || /^[ \t]*#/.test(line)) continue;
-		const match = /^([a-z][a-z0-9-]*):(.*)$/.exec(line);
+		const match = /^([a-z][a-z0-9-]*):([^]*)$/.exec(line);
 		if (!match) return { kind: "bad", reason: `line ${index + 1} is not "key: value"` };
 		const key = match[1] ?? "";
 		if (!FLAG_KEYS.has(key)) return { kind: "bad", reason: `it has an unknown key "${key}"` };
@@ -279,8 +372,13 @@ export function parsePauseFlag(text: string): PauseFlagRead {
 	}
 	const raw = values.get("paused");
 	if (raw === undefined) return { kind: "bad", reason: `it has no "paused" key` };
-	// The comment first, then the quotes: `paused: "false"  # resumed` reads false.
-	const value = unquote(raw.trim().replace(/\s+#.*$/, "")).trim().toLowerCase();
+	// The same steps, in the same order, as the shell reader: leading space,
+	// the comment, the quotes, then both edges; then ASCII lower case. Only
+	// POSIX [[:space:]] counts as space, so a no-break space or a BOM next to
+	// the value is part of it, and the value is bad, as there.
+	const value = asciiLower(
+		trimSpace(unquote(raw.replace(LEADING_SPACE, "").replace(COMMENT, "")))
+	);
 	if (value === "false" || value === "no") return { kind: "clear" };
 	if (value !== "true" && value !== "yes") {
 		return { kind: "bad", reason: `its "paused" value is not true, false, yes or no` };
@@ -292,14 +390,31 @@ export function parsePauseFlag(text: string): PauseFlagRead {
 	return { kind: "paused", reason: why ? `${head}: ${why}` : head };
 }
 
+// POSIX [[:space:]] in the C locale: space, tab, newline, vertical tab, form
+// feed, carriage return. Not JavaScript's \s, which also takes U+00A0,
+// U+2003, U+FEFF and others: those made the plugin read a value as clear that
+// the shell reader reads as bad.
+const LEADING_SPACE = /^[ \t\n\v\f\r]+/;
+const TRAILING_SPACE = /[ \t\n\v\f\r]+$/;
+const COMMENT = /[ \t\n\v\f\r]+#[^]*$/;
+
+function trimSpace(value: string): string {
+	return value.replace(LEADING_SPACE, "").replace(TRAILING_SPACE, "");
+}
+
+function asciiLower(value: string): string {
+	return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+}
+
+/** Double quotes, then single quotes, one pair each, as the shell's two sed steps. */
 function unquote(value: string): string {
-	const quoted = /^"(.*)"$/.exec(value) ?? /^'(.*)'$/.exec(value);
-	return quoted ? (quoted[1] ?? "") : value;
+	const once = /^"([^]*)"$/.exec(value)?.[1] ?? value;
+	return /^'([^]*)'$/.exec(once)?.[1] ?? once;
 }
 
 function flagText(raw: string | undefined): string | null {
 	if (raw === undefined) return null;
-	const value = unquote(raw.trim()).trim();
+	const value = unquote(raw.replace(LEADING_SPACE, "")).replace(TRAILING_SPACE, "");
 	return value.length > 0 ? value : null;
 }
 
