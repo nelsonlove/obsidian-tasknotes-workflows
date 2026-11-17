@@ -184,6 +184,15 @@ export class PauseGate {
 			);
 			return NOT_PAUSED;
 		}
+		if (frontmatter.paused === undefined) {
+			// Still fail-open, as for a missing note, but no longer silent: a note
+			// whose `paused` key was removed can no longer pause anything.
+			this.warnOnce(
+				`nokey:${path}`,
+				`TaskNotes Workflows: the pause note "${path}" has no \`paused\` property; workflows run normally.`
+			);
+			return NOT_PAUSED;
+		}
 		if (!isPausedValue(frontmatter.paused)) return NOT_PAUSED;
 		return { paused: true, reason: pauseReason(path, frontmatter) };
 	}

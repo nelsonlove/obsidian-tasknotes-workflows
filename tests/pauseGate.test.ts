@@ -123,6 +123,15 @@ describe("pause gate", () => {
 		expect(warn).not.toHaveBeenCalled();
 	});
 
+	it("warns once, and still runs, when the pause note has no paused property", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const gate = new PauseGate(appWith({ "paused-by": "alex" }), () => PAUSE_PATH);
+		expect(gate.check().paused).toBe(false);
+		gate.check();
+		expect(warn).toHaveBeenCalledTimes(1);
+		expect(warn.mock.calls[0]?.[0]).toContain("has no `paused` property");
+	});
+
 	it("falls back to unknown for an incomplete pause note", () => {
 		const gate = new PauseGate(appWith({ paused: true }), () => PAUSE_PATH);
 		expect(gate.check().reason).toContain("paused by unknown since unknown");
