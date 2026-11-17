@@ -2,7 +2,7 @@ import { Notice, Plugin, TFile } from "obsidian";
 import type { BasesViewRegistration } from "obsidian";
 import { DefaultWorkflowsService } from "./src/defaultWorkflowsService";
 import { RunLogService } from "./src/runLogService";
-import { PauseGate, PauseSkipLog } from "./src/pauseGate";
+import { PauseFlagPathStore, PauseGate, PauseSkipLog } from "./src/pauseGate";
 import { HostNameStore, countNeedingMachineName, decideHost, hostBlockedMessage } from "./src/hostGate";
 import { WorkflowScheduler } from "./src/scheduler";
 import { DEFAULT_SETTINGS, normalizeSettings } from "./src/settings";
@@ -50,6 +50,7 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 	private scheduler!: WorkflowScheduler;
 	private defaults!: DefaultWorkflowsService;
 	private pauseGate!: PauseGate;
+	private pauseFlagPaths!: PauseFlagPathStore;
 	private readonly pauseSkips = new PauseSkipLog();
 	private hostNames!: HostNameStore;
 	private workflowMigrations!: WorkflowMigrationService;
@@ -133,9 +134,14 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 			(workflow, options) => this.executeWorkflow(workflow, options)
 		);
 		this.defaults = new DefaultWorkflowsService(this.app, () => this.settings);
-		// One gate per plugin load, so its "pause note unreadable" warning is
+		// One gate per plugin load, so its "pause flag unreadable" warnings are
 		// logged once rather than once per run.
-		this.pauseGate = new PauseGate(this.app, () => this.settings.pauseNotePath);
+		this.pauseFlagPaths = new PauseFlagPathStore(this.app);
+		this.pauseGate = new PauseGate(
+			this.app,
+			() => this.settings.pauseNotePath,
+			() => this.pauseFlagPaths.get()
+		);
 		this.hostNames = new HostNameStore(this.app);
 		this.workflowMigrations = new WorkflowMigrationService(
 			this.app,
@@ -193,6 +199,16 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 	async saveSettingsAndReload(): Promise<void> {
 		await this.saveSettings();
 		await this.reloadWorkflows();
+	}
+
+	/** This device's pause flag file path, from per-device local storage (never synced). */
+	get pauseFlagPath(): string {
+		return this.pauseFlagPaths.get();
+	}
+
+	/** Sets this device's pause flag file path; empty hands the check back to the pause note. */
+	setPauseFlagPath(value: string): void {
+		this.pauseFlagPaths.set(value);
 	}
 
 	/** This device's name, from per-device local storage (never synced). */
@@ -357,7 +373,7 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 				refreshWorkflowNoteCards(this, workflow.file.path);
 			}
 			if (options.manual) {
-				new Notice(`Workflow runs are paused by ${this.settings.pauseNotePath} (${reason}).`);
+				new Notice(`Workflow runs are paused (${reason}).`);
 			}
 			return detail;
 		}

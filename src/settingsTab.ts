@@ -203,13 +203,26 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Pause note")
 			.setDesc(
-				"Vault path of the fleet pause note. While its `paused` property is true, no workflow runs and each attempt is logged as a skipped run. Leave empty to switch the check off."
+				"Vault path of the fleet pause note. While its `paused` property is true, no workflow runs and each attempt is logged as a skipped run. Not read when a pause flag file is set below, except on mobile. Leave empty to switch the check off."
 			)
 			.addText((text) => {
-				text.setPlaceholder("00-09 System/.../Pause.md");
+				text.setPlaceholder("Admin/Pause.md");
 				text.setValue(this.workflowsPlugin.settings.pauseNotePath);
 				this.commitTextOnFinish(text, (value) => {
 					this.updatePauseNotePath(value);
+				});
+			});
+
+		new Setting(containerEl)
+			.setName("Pause flag file")
+			.setDesc(
+				"This device only (kept per device, not synced), desktop only. Absolute path of a pause flag file outside the vault; a leading ~ is your home folder. The file holds `key: value` lines: `paused` (true, false, yes or no) and, optionally, `why`, `by` and `at`. While it says paused, no workflow runs. A missing file is not a pause; a file that exists but cannot be read or parsed holds every run. When set, the pause note above is not read on desktop. Leave empty to use the pause note."
+			)
+			.addText((text) => {
+				text.setPlaceholder("~/pause-flag");
+				text.setValue(this.workflowsPlugin.pauseFlagPath);
+				this.commitTextOnFinish(text, (value) => {
+					this.updatePauseFlagPath(value);
 				});
 			});
 
@@ -370,6 +383,13 @@ export class WorkflowsSettingsTab extends PluginSettingTab {
 		if (next === this.workflowsPlugin.settings.pauseNotePath) return;
 		this.workflowsPlugin.settings.pauseNotePath = next;
 		void this.workflowsPlugin.saveSettings();
+	}
+
+	private updatePauseFlagPath(value: string): void {
+		// Empty is a meaningful value here: it hands the check back to the pause note.
+		const next = value.trim();
+		if (next === this.workflowsPlugin.pauseFlagPath) return;
+		this.workflowsPlugin.setPauseFlagPath(next);
 	}
 
 	private renderAllowedKeysWarning(ignored: string[]): void {
