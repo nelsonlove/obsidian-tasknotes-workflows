@@ -19,6 +19,7 @@ export const DEFAULT_SETTINGS: TaskNotesWorkflowsSettings = {
 	enableCodeSteps: false,
 	allowedFrontmatterKeys: [],
 	pauseNotePath: "",
+	pauseFlagPath: "",
 	nameKey: DEFAULT_NAME_KEY,
 };
 
@@ -37,6 +38,7 @@ export function normalizeSettings(input: Partial<TaskNotesWorkflowsSettings>): T
 		// An empty path is meaningful here (the pause check is off), so this
 		// trims without falling back to the default.
 		pauseNotePath: typeof input.pauseNotePath === "string" ? input.pauseNotePath.trim() : DEFAULT_SETTINGS.pauseNotePath,
+		pauseFlagPath: typeof input.pauseFlagPath === "string" ? input.pauseFlagPath.trim() : DEFAULT_SETTINGS.pauseFlagPath,
 		nameKey: normalizeNameKey(input.nameKey),
 	};
 }

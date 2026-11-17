@@ -133,9 +133,13 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 			(workflow, options) => this.executeWorkflow(workflow, options)
 		);
 		this.defaults = new DefaultWorkflowsService(this.app, () => this.settings);
-		// One gate per plugin load, so its "pause note unreadable" warning is
+		// One gate per plugin load, so its "pause flag unreadable" warnings are
 		// logged once rather than once per run.
-		this.pauseGate = new PauseGate(this.app, () => this.settings.pauseNotePath);
+		this.pauseGate = new PauseGate(
+			this.app,
+			() => this.settings.pauseNotePath,
+			() => this.settings.pauseFlagPath
+		);
 		this.hostNames = new HostNameStore(this.app);
 		this.workflowMigrations = new WorkflowMigrationService(
 			this.app,
@@ -357,7 +361,7 @@ export default class TaskNotesWorkflowsPlugin extends Plugin {
 				refreshWorkflowNoteCards(this, workflow.file.path);
 			}
 			if (options.manual) {
-				new Notice(`Workflow runs are paused by ${this.settings.pauseNotePath} (${reason}).`);
+				new Notice(`Workflow runs are paused (${reason}).`);
 			}
 			return detail;
 		}

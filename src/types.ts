@@ -19,6 +19,15 @@ export interface TaskNotesWorkflowsSettings {
 	allowedFrontmatterKeys: string[];
 	/** Vault path of the fleet pause flag note. Empty disables the check. */
 	pauseNotePath: string;
+	/**
+	 * Absolute path (a leading `~` is the home folder) of a fleet pause flag
+	 * file outside the vault, read on desktop. When set, it replaces the pause
+	 * note there; a file that exists but cannot be read or parsed holds every
+	 * run. Empty (the default) leaves the pause note in charge.
+	 *
+	 * EXIT: when the fleet pause has no other state than the key file and every reader reads it; renew by the monthly sweep.
+	 */
+	pauseFlagPath: string;
 	/** Frontmatter key that carries a workflow's display name. */
 	nameKey: string;
 }

@@ -1,8 +1,16 @@
 import { TFile, TFolder } from "obsidian";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PauseGate, PauseSkipLog, isPausedValue } from "../src/pauseGate";
+import {
+	PauseGate,
+	PauseSkipLog,
+	expandHome,
+	isPausedValue,
+	parsePauseFlag,
+	type PauseFlagFs,
+	type PauseFlagHost,
+} from "../src/pauseGate";
 
-const PAUSE_PATH = "00-09 System/00 System management/00.08 Operator's console/Pause.md";
+const PAUSE_PATH = "Admin/Console/Pause.md";
 
 function appWith(frontmatter: Record<string, unknown> | null, path = PAUSE_PATH): never {
 	const file = new TFile();
@@ -33,7 +41,7 @@ describe("pause gate", () => {
 		const gate = new PauseGate(
 			appWith({
 				paused: true,
-				"paused-by": "nelson",
+				"paused-by": "alex",
 				"paused-since": "2026-09-22T07:38",
 				"paused-why": "vault maintenance",
 			}),
@@ -41,7 +49,7 @@ describe("pause gate", () => {
 		);
 		const state = gate.check();
 		expect(state.paused).toBe(true);
-		expect(state.reason).toContain("paused by nelson since 2026-09-22T07:38: vault maintenance");
+		expect(state.reason).toContain("paused by alex since 2026-09-22T07:38: vault maintenance");
 		expect(state.reason).toContain(PAUSE_PATH);
 	});
 
@@ -115,6 +123,173 @@ describe("pause gate", () => {
 	});
 });
 
+const HOME = "/home/example";
+const FLAG = "/srv/example/pause";
+
+type FakeEntry = string | { error: string } | { symlink: true } | { folder: true };
+
+/** An in-memory file system: path -> text, an error code, a symlink or a folder. */
+function fakeHost(files: Record<string, FakeEntry>, homedir = HOME): PauseFlagHost & { reads: string[] } {
+	const reads: string[] = [];
+	const fail = (code: string): never => {
+		throw Object.assign(new Error(code), { code });
+	};
+	const fs: PauseFlagFs = {
+		lstatSync(path) {
+			reads.push(path);
+			const entry = files[path];
+			if (entry === undefined) return fail("ENOENT");
+			if (typeof entry === "string") {
+				return { isSymbolicLink: () => false, isFile: () => true, size: Buffer.byteLength(entry) };
+			}
+			if ("error" in entry) return fail(entry.error);
+			if ("symlink" in entry) return { isSymbolicLink: () => true, isFile: () => false, size: 10 };
+			return { isSymbolicLink: () => false, isFile: () => false, size: 64 };
+		},
+		readFileSync(path) {
+			const entry = files[path];
+			if (typeof entry === "string") return entry;
+			return fail("EIO");
+		},
+	};
+	return { fs, homedir, reads };
+}
+
+function flagGate(files: Record<string, FakeEntry>, flagPath = FLAG, app: never = emptyApp()): PauseGate {
+	const host = fakeHost(files);
+	return new PauseGate(app, () => PAUSE_PATH, () => flagPath, () => host);
+}
+
+describe("pause gate, flag file road", () => {
+	it("a missing flag file is not a pause", () => {
+		expect(flagGate({}).check()).toEqual({ paused: false });
+	});
+
+	it("pauses on paused: true and reports who, since, why and the file", () => {
+		const state = flagGate({
+			[FLAG]: "paused: true\nwhy: disk maintenance\nby: alex\nat: 2026-01-02T03:04:05+00:00\n",
+		}).check();
+		expect(state.paused).toBe(true);
+		expect(state.reason).toBe(
+			`paused by alex since 2026-01-02T03:04:05+00:00: disk maintenance (${FLAG})`
+		);
+	});
+
+	it("does not pause on paused: false or no", () => {
+		for (const text of ["paused: false\n", "paused: no\nwhy: done\n", 'paused: "FALSE"  # resumed\n']) {
+			expect(flagGate({ [FLAG]: text }).check().paused, text).toBe(false);
+		}
+	});
+
+	it("reads yes, quotes, CRLF, comments and blank lines the way the shell reader does", () => {
+		for (const text of ["paused: yes", "paused: 'True'", "# a comment\r\n\r\npaused: true\r\n", "paused: true # set by hand"]) {
+			expect(flagGate({ [FLAG]: text }).check().paused, text).toBe(true);
+		}
+	});
+
+	it("falls back to unknown when by and at are absent", () => {
+		expect(flagGate({ [FLAG]: "paused: true\n" }).check().reason).toBe(`paused by unknown since unknown (${FLAG})`);
+	});
+
+	it("fails closed on a file it cannot read, warning once", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const gate = flagGate({ [FLAG]: { error: "EACCES" } });
+		const first = gate.check();
+		expect(first.paused).toBe(true);
+		expect(first.reason).toContain("cannot be read");
+		expect(first.reason).toContain("EACCES");
+		expect(gate.check()).toEqual(first);
+		expect(warn).toHaveBeenCalledTimes(1);
+	});
+
+	it("fails closed on a symlink, a folder and an oversized file", () => {
+		vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		expect(flagGate({ [FLAG]: { symlink: true } }).check().reason).toContain("symlink");
+		expect(flagGate({ [FLAG]: { folder: true } }).check().reason).toContain("not a plain file");
+		expect(flagGate({ [FLAG]: `paused: false\nwhy: ${"x".repeat(5000)}\n` }).check().reason).toContain("over 4096 bytes");
+	});
+
+	it("fails closed on a malformed flag", () => {
+		vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const cases: Record<string, string> = {
+			"paused true\n": "line 1",
+			"paused: true\nwho: alex\n": 'unknown key "who"',
+			"paused: true\npaused: false\n": 'key "paused" twice',
+			"why: no key\n": 'no "paused" key',
+			"": 'no "paused" key',
+			"paused: off\n": "not true, false, yes or no",
+			"paused: 1\n": "not true, false, yes or no",
+			"  paused: true\n": "line 1",
+		};
+		for (const [text, expected] of Object.entries(cases)) {
+			const state = flagGate({ [FLAG]: text }).check();
+			expect(state.paused, JSON.stringify(text)).toBe(true);
+			expect(state.reason, JSON.stringify(text)).toContain(expected);
+		}
+	});
+
+	it("expands a leading ~ to the home folder", () => {
+		const host = fakeHost({ [`${HOME}/flags/pause`]: "paused: true\n" });
+		const gate = new PauseGate(emptyApp(), () => "", () => "~/flags/pause", () => host);
+		expect(gate.check().paused).toBe(true);
+		expect(host.reads).toEqual([`${HOME}/flags/pause`]);
+		expect(expandHome("~", HOME)).toBe(HOME);
+		expect(expandHome("~/a", `${HOME}/`)).toBe(`${HOME}/a`);
+		expect(expandHome("/abs/~/x", HOME)).toBe("/abs/~/x");
+	});
+
+	it("fails closed on a path that is not absolute, ~user included", () => {
+		vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		for (const path of ["relative/pause", "~other/pause"]) {
+			const state = flagGate({}, path).check();
+			expect(state.paused, path).toBe(true);
+			expect(state.reason, path).toContain("not absolute");
+		}
+	});
+
+	it("does not read the pause note when a flag file is set", () => {
+		const state = flagGate({}, FLAG, appWith({ paused: true })).check();
+		expect(state.paused).toBe(false);
+	});
+
+	it("keeps the reason stable from one read to the next, so the skip log records once", () => {
+		vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const gate = flagGate({ [FLAG]: "garbage\n" });
+		expect(gate.check().reason).toBe(gate.check().reason);
+	});
+
+	it("falls back to the pause note on a device without file system access", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const gate = new PauseGate(appWith({ paused: true }), () => PAUSE_PATH, () => FLAG, () => null);
+		expect(gate.check().paused).toBe(true);
+		gate.check();
+		expect(warn).toHaveBeenCalledTimes(1);
+		expect(warn.mock.calls[0]?.[0]).toContain("pause note is checked instead");
+	});
+
+	it("uses the pause note when the flag path is empty, and never touches the file system", () => {
+		const host = fakeHost({ [FLAG]: "paused: true\n" });
+		const gate = new PauseGate(appWith({ paused: false }), () => PAUSE_PATH, () => "  ", () => host);
+		expect(gate.check().paused).toBe(false);
+		expect(host.reads).toEqual([]);
+		const noted = new PauseGate(appWith({ paused: true }), () => PAUSE_PATH, () => "", () => host);
+		expect(noted.check().paused).toBe(true);
+	});
+
+	it("defaults to the note road when constructed without a flag path", () => {
+		expect(new PauseGate(appWith({ paused: true }), () => PAUSE_PATH).check().paused).toBe(true);
+	});
+});
+
+describe("parsePauseFlag", () => {
+	it("splits a value on the first colon only", () => {
+		expect(parsePauseFlag("paused: yes\nat: 2026-01-02T03:04:05-05:00\n")).toEqual({
+			kind: "paused",
+			reason: "paused by unknown since 2026-01-02T03:04:05-05:00",
+		});
+	});
+});
+
 describe("isPausedValue", () => {
 	it("accepts only true and the true-ish strings", () => {
 		expect(isPausedValue(true)).toBe(true);
@@ -126,8 +301,8 @@ describe("isPausedValue", () => {
 });
 
 describe("pause skip log", () => {
-	const REASON = "paused by nelson since 2026-09-22T07:38: vault maintenance";
-	const NEW_REASON = "paused by nelson since 2026-09-23T09:00: second pause";
+	const REASON = "paused by alex since 2026-09-22T07:38: vault maintenance";
+	const NEW_REASON = "paused by alex since 2026-09-23T09:00: second pause";
 
 	/** Drives the log the way executeWorkflow does: ask, write, then mark. */
 	function tick(log: PauseSkipLog, reason: string, recorded: string[], write: () => void = () => undefined): void {
