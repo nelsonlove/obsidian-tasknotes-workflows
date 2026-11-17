@@ -238,7 +238,7 @@ export function readPauseFlag(path: string, fs: PauseFlagFs, homedir = ""): Paus
 	if (!flagFolderOk(path, fs, homedir)) {
 		return {
 			kind: "bad",
-			reason: "its folder, or a folder above it up to the home folder, is a symlink or cannot be entered",
+			reason: "its folder (or, inside the home folder, a folder above it) is a symlink or cannot be entered",
 		};
 	}
 	let stat: ReturnType<PauseFlagFs["lstatSync"]>;
@@ -310,9 +310,11 @@ function physicalFolder(path: string, fs: PauseFlagFs): string | null {
 
 /**
  * The shell reader's pause_flag_dir_ok, step for step, so the two readers give
- * one answer. True when no folder on the way to the flag's folder is a symlink
- * (the folder's physical path is its written path once the home folder's own
- * physical path is put in), or when the folder does not exist yet and the
+ * one answer. Inside the home folder: true when no folder between the home
+ * folder and the flag's folder is a symlink (the folder's physical path is its
+ * written path once the home folder's own physical path is put in). Outside
+ * it: true when the flag's folder itself is not a symlink; folders higher up
+ * are not checked, as in the shell. Also true when the folder does not exist yet and the
  * nearest folder that does exist can be entered (a folder that cannot be
  * searched hides the flag, and a hidden flag must not read as missing).
  * POSIX paths only; other paths are not checked.
